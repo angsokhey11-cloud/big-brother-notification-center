@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>BIG BROTHER • Notification Center</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">BB</div>
+        <div>
+          <strong>BIG BROTHER</strong>
+          <span>Notification Center</span>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Notification Center navigation">
+        <button class="nav-item active" data-page="overview">Overview</button>
+        <button class="nav-item" data-page="staff">Staff Telegram</button>
+        <button class="nav-item" data-page="rules">Notification Rules</button>
+        <button class="nav-item" data-page="logs">Delivery Logs</button>
+      </nav>
+
+      <div class="sidebar-note">
+        <span class="dot ok"></span>
+        Notification-only architecture
+        <small>No invoice/payment write controls</small>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">ADMIN MODULE</p>
+          <h1 id="pageTitle">Notification Center</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="environment">BIG BROTHER DEV</span>
+          <button id="refreshBtn" class="btn secondary">Refresh</button>
+        </div>
+      </header>
+
+      <section class="page active" id="page-overview">
+        <div class="hero panel">
+          <div>
+            <p class="eyebrow">TELEGRAM</p>
+            <h2>Notification transport is verified</h2>
+            <p>Supabase → Edge Function → Telegram was tested successfully. The control panel remains separated from all accounting write functions.</p>
+          </div>
+          <div class="hero-badge">
+            <span class="dot ok"></span>
+            Verified
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stat-card panel">
+            <span>Telegram Delivery</span>
+            <strong>Connected</strong>
+            <small>Test message delivered</small>
+          </article>
+          <article class="stat-card panel">
+            <span>Accounting Writes</span>
+            <strong class="safe">Blocked</strong>
+            <small>No clear / approve / reject via Telegram</small>
+          </article>
+          <article class="stat-card panel">
+            <span>Staff Mappings</span>
+            <strong id="staffCount">—</strong>
+            <small>Backend mapping table next</small>
+          </article>
+          <article class="stat-card panel">
+            <span>Recent Deliveries</span>
+            <strong id="deliveryCount">—</strong>
+            <small>Delivery log connection next</small>
+          </article>
+        </div>
+
+        <div class="two-col">
+          <section class="panel section-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">BOT CONTROL</p>
+                <h3>Telegram notification bot</h3>
+              </div>
+              <span class="status-pill success">Transport verified</span>
+            </div>
+            <div class="detail-list">
+              <div><span>Test function</span><code>bb-telegram-notify-test</code></div>
+              <div><span>Chat ID helper</span><code>bb-telegram-chat-id</code></div>
+              <div><span>Bot token</span><strong>Stored in Supabase Secrets</strong></div>
+              <div><span>Repository access</span><strong>No token stored here</strong></div>
+            </div>
+            <button id="testMessageBtn" class="btn primary">Send Test Message</button>
+            <p id="testMessageHint" class="hint">The secure admin endpoint will be connected next. No secret is exposed to this page.</p>
+          </section>
+
+          <section class="panel section-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">PLANNED EVENTS</p>
+                <h3>Notification workflow</h3>
+              </div>
+            </div>
+            <div class="event-list">
+              <div class="event-row"><span class="event-icon danger">!</span><div><strong>Overdue invoice</strong><small>Notify responsible salesperson only</small></div><span class="status-pill pending">Next</span></div>
+              <div class="event-row"><span class="event-icon">↗</span><div><strong>Request submitted</strong><small>Confirm submission to requesting staff</small></div><span class="status-pill pending">Planned</span></div>
+              <div class="event-row"><span class="event-icon success">✓</span><div><strong>Request approved</strong><small>Notify requesting staff</small></div><span class="status-pill pending">Planned</span></div>
+              <div class="event-row"><span class="event-icon danger">×</span><div><strong>Request rejected</strong><small>Notify staff with rejection reason</small></div><span class="status-pill pending">Planned</span></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="page" id="page-staff">
+        <div class="panel section-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">STAFF TELEGRAM</p>
+              <h2>Staff ↔ Telegram mapping</h2>
+              <p>Each staff member will receive only the notification types and customers assigned to them.</p>
+            </div>
+            <button class="btn primary" disabled title="Backend mapping endpoint is the next build step">Add Mapping</button>
+          </div>
+          <div class="empty-state">
+            <div class="empty-icon">@</div>
+            <h3>No mapping data loaded yet</h3>
+            <p>The secure mapping table and admin API will be connected next.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-rules">
+        <div class="panel section-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">RULES</p>
+              <h2>Notification controls</h2>
+              <p>These controls will be saved in Supabase and evaluated by the notification service.</p>
+            </div>
+          </div>
+          <div class="rules-list">
+            <label class="rule-row"><div><strong>Overdue invoice alerts</strong><small>Notify salesperson when assigned invoice becomes overdue.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Request submitted confirmation</strong><small>Tell staff their request reached the system.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Approved result</strong><small>Notify requesting staff after admin approval.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Rejected result</strong><small>Notify requesting staff and include rejection reason.</small></div><input type="checkbox" checked disabled /></label>
+          </div>
+          <div class="reminder-box">
+            <strong>Default overdue reminder plan</strong>
+            <div class="chips"><span>Day 1</span><span>Day 3</span><span>Day 7</span><span>Day 15</span><span>Day 30</span></div>
+            <small>Duplicate protection will prevent the same reminder from being sent twice.</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-logs">
+        <div class="panel section-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">DELIVERY LOG</p>
+              <h2>Telegram notification history</h2>
+              <p>Successful and failed deliveries will appear here without exposing the bot token.</p>
+            </div>
+          </div>
+          <div class="empty-state">
+            <div class="empty-icon">≡</div>
+            <h3>No delivery log connected yet</h3>
+            <p>The notification log table is the next backend step.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
