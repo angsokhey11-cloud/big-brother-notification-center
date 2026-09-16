@@ -1,4 +1,4 @@
-/* BIG BROTHER Notification Center — Overdue Invoice Engine V1 */
+/* BIG BROTHER Notification Center — Overdue + Request Status Live Indicators V1.1 */
 (function(){
   'use strict';
 
@@ -37,12 +37,10 @@
     const page = document.getElementById('page-overview');
     if (!page) return;
 
-    const firstEvent = page.querySelector('.event-row');
-    const firstBadge = firstEvent?.querySelector('.status-pill');
-    if (firstBadge) {
-      firstBadge.textContent = 'Live';
-      firstBadge.className = 'status-pill success';
-    }
+    page.querySelectorAll('.event-row .status-pill').forEach((badge) => {
+      badge.textContent = 'Live';
+      badge.className = 'status-pill success';
+    });
 
     let card = document.getElementById('overdueEngineCard');
     if (!card) {
@@ -73,6 +71,7 @@
         <div><span>Daily schedule</span><strong>${escapeHtml(scheduleTime)} • ${escapeHtml(timezone)}</strong></div>
         <div><span>Reminder days</span><strong>${days.map((d) => `Day ${escapeHtml(d)}`).join(' • ')}</strong></div>
         <div><span>Routing</span><strong>Invoice salesperson → Group Topic</strong></div>
+        <div><span>Request status</span><strong>Submitted • Approved • Rejected → Group Topic</strong></div>
         <div><span>Duplicate protection</span><strong>Enabled</strong></div>
       </div>
       <button id="runOverdueNow" class="btn primary" type="button">Run Overdue Check Now</button>
