@@ -20,7 +20,7 @@
 
       <nav class="nav" aria-label="Notification Center navigation">
         <button class="nav-item active" data-page="overview">Overview</button>
-        <button class="nav-item" data-page="staff">Staff Telegram</button>
+        <button class="nav-item" data-page="staff">Group Topics</button>
         <button class="nav-item" data-page="rules">Notification Rules</button>
         <button class="nav-item" data-page="logs">Delivery Logs</button>
       </nav>
@@ -49,7 +49,7 @@
           <div>
             <p class="eyebrow">TELEGRAM</p>
             <h2>Notification transport is verified</h2>
-            <p>Supabase → Edge Function → Telegram was tested successfully. The control panel remains separated from all accounting write functions.</p>
+            <p>BIG BROTHER routes notifications into Telegram group topics. The control panel remains separated from all accounting write functions.</p>
           </div>
           <div class="hero-badge">
             <span class="dot ok"></span>
@@ -61,7 +61,7 @@
           <article class="stat-card panel">
             <span>Telegram Delivery</span>
             <strong>Connected</strong>
-            <small>Test message delivered</small>
+            <small>Group/topic delivery supported</small>
           </article>
           <article class="stat-card panel">
             <span>Accounting Writes</span>
@@ -69,14 +69,14 @@
             <small>No clear / approve / reject via Telegram</small>
           </article>
           <article class="stat-card panel">
-            <span>Staff Mappings</span>
+            <span>Group Topic Mappings</span>
             <strong id="staffCount">—</strong>
-            <small>Backend mapping table next</small>
+            <small>Responsible staff → group topic</small>
           </article>
           <article class="stat-card panel">
             <span>Recent Deliveries</span>
             <strong id="deliveryCount">—</strong>
-            <small>Delivery log connection next</small>
+            <small>Topic delivery history</small>
           </article>
         </div>
 
@@ -90,13 +90,13 @@
               <span class="status-pill success">Transport verified</span>
             </div>
             <div class="detail-list">
-              <div><span>Test function</span><code>bb-telegram-notify-test</code></div>
-              <div><span>Chat ID helper</span><code>bb-telegram-chat-id</code></div>
+              <div><span>Admin API</span><code>bb-notification-admin</code></div>
+              <div><span>Routing mode</span><strong>Group Chat ID + Topic ID</strong></div>
               <div><span>Bot token</span><strong>Stored in Supabase Secrets</strong></div>
               <div><span>Repository access</span><strong>No token stored here</strong></div>
             </div>
             <button id="testMessageBtn" class="btn primary">Send Test Message</button>
-            <p id="testMessageHint" class="hint">The secure admin endpoint will be connected next. No secret is exposed to this page.</p>
+            <p id="testMessageHint" class="hint">Use a Group Topic mapping's Test button to verify an exact topic destination.</p>
           </section>
 
           <section class="panel section-card">
@@ -107,10 +107,10 @@
               </div>
             </div>
             <div class="event-list">
-              <div class="event-row"><span class="event-icon danger">!</span><div><strong>Overdue invoice</strong><small>Notify responsible salesperson only</small></div><span class="status-pill pending">Next</span></div>
-              <div class="event-row"><span class="event-icon">↗</span><div><strong>Request submitted</strong><small>Confirm submission to requesting staff</small></div><span class="status-pill pending">Planned</span></div>
-              <div class="event-row"><span class="event-icon success">✓</span><div><strong>Request approved</strong><small>Notify requesting staff</small></div><span class="status-pill pending">Planned</span></div>
-              <div class="event-row"><span class="event-icon danger">×</span><div><strong>Request rejected</strong><small>Notify staff with rejection reason</small></div><span class="status-pill pending">Planned</span></div>
+              <div class="event-row"><span class="event-icon danger">!</span><div><strong>Overdue invoice</strong><small>Route to the responsible staff group topic</small></div><span class="status-pill pending">Next</span></div>
+              <div class="event-row"><span class="event-icon">↗</span><div><strong>Request submitted</strong><small>Post confirmation into the staff topic</small></div><span class="status-pill pending">Planned</span></div>
+              <div class="event-row"><span class="event-icon success">✓</span><div><strong>Request approved</strong><small>Post approval result into the staff topic</small></div><span class="status-pill pending">Planned</span></div>
+              <div class="event-row"><span class="event-icon danger">×</span><div><strong>Request rejected</strong><small>Post rejection reason into the staff topic</small></div><span class="status-pill pending">Planned</span></div>
             </div>
           </section>
         </div>
@@ -120,16 +120,16 @@
         <div class="panel section-card">
           <div class="section-head">
             <div>
-              <p class="eyebrow">STAFF TELEGRAM</p>
-              <h2>Staff ↔ Telegram mapping</h2>
-              <p>Each staff member will receive only the notification types and customers assigned to them.</p>
+              <p class="eyebrow">TELEGRAM GROUP ROUTING</p>
+              <h2>Staff ↔ Group Topic mapping</h2>
+              <p>Map each responsible staff member to a topic inside your BIG BROTHER Telegram forum group.</p>
             </div>
-            <button class="btn primary" disabled title="Backend mapping endpoint is the next build step">Add Mapping</button>
+            <button class="btn primary">Add Group Topic</button>
           </div>
           <div class="empty-state">
-            <div class="empty-icon">@</div>
-            <h3>No mapping data loaded yet</h3>
-            <p>The secure mapping table and admin API will be connected next.</p>
+            <div class="empty-icon">#</div>
+            <h3>No group topic mappings yet</h3>
+            <p>Add a staff → group/topic route to begin tracking notifications as a team.</p>
           </div>
         </div>
       </section>
@@ -140,14 +140,14 @@
             <div>
               <p class="eyebrow">RULES</p>
               <h2>Notification controls</h2>
-              <p>These controls will be saved in Supabase and evaluated by the notification service.</p>
+              <p>These controls are saved in Supabase and evaluated by the notification service.</p>
             </div>
           </div>
           <div class="rules-list">
-            <label class="rule-row"><div><strong>Overdue invoice alerts</strong><small>Notify salesperson when assigned invoice becomes overdue.</small></div><input type="checkbox" checked disabled /></label>
-            <label class="rule-row"><div><strong>Request submitted confirmation</strong><small>Tell staff their request reached the system.</small></div><input type="checkbox" checked disabled /></label>
-            <label class="rule-row"><div><strong>Approved result</strong><small>Notify requesting staff after admin approval.</small></div><input type="checkbox" checked disabled /></label>
-            <label class="rule-row"><div><strong>Rejected result</strong><small>Notify requesting staff and include rejection reason.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Overdue invoice alerts</strong><small>Post when an assigned invoice becomes overdue.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Request submitted confirmation</strong><small>Post when the staff request reaches the system.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Approved result</strong><small>Post after admin approval.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Rejected result</strong><small>Post the rejection result and reason.</small></div><input type="checkbox" checked disabled /></label>
           </div>
           <div class="reminder-box">
             <strong>Default overdue reminder plan</strong>
@@ -162,14 +162,14 @@
           <div class="section-head">
             <div>
               <p class="eyebrow">DELIVERY LOG</p>
-              <h2>Telegram notification history</h2>
-              <p>Successful and failed deliveries will appear here without exposing the bot token.</p>
+              <h2>Telegram group/topic history</h2>
+              <p>Successful and failed topic deliveries appear here without exposing the bot token.</p>
             </div>
           </div>
           <div class="empty-state">
             <div class="empty-icon">≡</div>
-            <h3>No delivery log connected yet</h3>
-            <p>The notification log table is the next backend step.</p>
+            <h3>No Telegram deliveries logged yet</h3>
+            <p>Send a topic test notification and it will appear here.</p>
           </div>
         </div>
       </section>
@@ -178,5 +178,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
+  <script src="group-routing-v1.js"></script>
 </body>
 </html>
