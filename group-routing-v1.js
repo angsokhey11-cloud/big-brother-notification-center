@@ -1,4 +1,4 @@
-/* BIG BROTHER Notification Center — Telegram Group Topic Routing V1 */
+/* BIG BROTHER Notification Center — Telegram Group Topic Routing V2 */
 (function(){
   'use strict';
 
@@ -51,6 +51,14 @@
           </label>
 
           <label>
+            Route / Topic Type
+            <select id="mappingDestination" ${existing ? 'disabled' : ''} required>
+              <option value="AR" ${(existing?.destination_key || 'AR') === 'AR' ? 'selected' : ''}>A/R — Receivable</option>
+              <option value="STOCK" ${existing?.destination_key === 'STOCK' ? 'selected' : ''}>STOCK — Stock & Calculator Report</option>
+            </select>
+          </label>
+
+          <label>
             Group Chat ID
             <input id="mappingChatId" inputmode="numeric" value="${escapeHtml(existing?.telegram_chat_id || '')}" placeholder="-1004317302923" required />
           </label>
@@ -67,7 +75,7 @@
 
           <div class="reminder-box" style="margin:0">
             <strong>How routing works</strong>
-            <small>Invoices and requests owned by this staff member will be posted into this Telegram group topic. Leave Topic ID blank only if you want the main group chat.</small>
+            <small>A/R alerts use the A/R mapping only. Stock and Calculator Reports use the STOCK mapping only. One staff member can have both routes in the same Telegram group with different Topic IDs.</small>
           </div>
 
           <label class="check-line"><input id="mappingActive" type="checkbox" ${existing?.active === false ? '' : 'checked'} /> Active</label>
@@ -100,6 +108,7 @@
         await adminCall({
           action: 'save_mapping',
           staff_id: existing?.staff_id || document.getElementById('mappingStaff').value,
+          destination_key: existing?.destination_key || document.getElementById('mappingDestination').value,
           telegram_chat_id: document.getElementById('mappingChatId').value,
           telegram_thread_id: document.getElementById('mappingThreadId').value,
           destination_label: document.getElementById('mappingLabel').value,
@@ -118,10 +127,10 @@
     });
   };
 
-  sendStaffTest = async function(staffId, button){
+  sendStaffTest = async function(staffId, destinationKey, button){
     setBusy(button, true, 'Sending…');
     try {
-      await adminCall({ action: 'send_test', staff_id: staffId });
+      await adminCall({ action: 'send_test', staff_id: staffId, destination_key: destinationKey });
       showToast('Test notification sent to the mapped Telegram topic.', 'success');
       await bootstrap(false);
     } catch (error) {
@@ -156,18 +165,18 @@
     content.className = 'staff-table-wrap';
     content.innerHTML = `
       <div class="data-table">
-        <div class="data-row data-head"><span>Responsible Staff</span><span>Group / Topic</span><span>Status</span><span>Actions</span></div>
+        <div class="data-row data-head"><span>Responsible Staff</span><span>Route / Group Topic</span><span>Status</span><span>Actions</span></div>
         ${state.links.map((link) => {
           const topic = link.telegram_thread_id ? `Topic ${link.telegram_thread_id}` : 'Main group chat';
           const label = link.destination_label || topic;
           return `
-            <div class="data-row" data-staff-id="${escapeHtml(link.staff_id)}">
+            <div class="data-row" data-link-id="${escapeHtml(link.link_id)}">
               <span>
                 <strong>${escapeHtml(link.staff?.staff_name || link.staff_id)}</strong>
                 <small>${escapeHtml(link.staff?.staff_code || '')}</small>
               </span>
               <span>
-                <strong>${escapeHtml(label)}</strong>
+                <strong>${escapeHtml(link.destination_key || 'AR')} · ${escapeHtml(label)}</strong>
                 <small>${escapeHtml(link.telegram_chat_id_masked || '')} • ${escapeHtml(topic)}</small>
               </span>
               <span><span class="status-pill ${link.active ? 'success' : 'pending'}">${link.active ? 'Active' : 'Paused'}</span></span>
@@ -180,18 +189,21 @@
         }).join('')}
       </div>`;
 
-    content.querySelectorAll('.data-row[data-staff-id]').forEach((row) => {
-      const staffId = row.dataset.staffId;
-      const link = state.links.find((item) => item.staff_id === staffId);
+    content.querySelectorAll('.data-row[data-link-id]').forEach((row) => {
+      const linkId = String(row.dataset.linkId || '');
+      const link = state.links.find((item) => String(item.link_id) === linkId);
+      if (!link) return;
+      const staffId = link.staff_id;
+      const destinationKey = link.destination_key || 'AR';
 
       row.querySelector('.mapping-edit').addEventListener('click', () => openMappingDialog(link));
-      row.querySelector('.mapping-test').addEventListener('click', (event) => sendStaffTest(staffId, event.currentTarget));
+      row.querySelector('.mapping-test').addEventListener('click', (event) => sendStaffTest(staffId, destinationKey, event.currentTarget));
       row.querySelector('.mapping-toggle').addEventListener('click', async (event) => {
         const button = event.currentTarget;
         setBusy(button, true, 'Saving…');
         try {
-          await adminCall({ action: 'set_mapping_active', staff_id: staffId, active: !link.active });
-          showToast(`Group topic mapping ${link.active ? 'paused' : 'enabled'}.`, 'success');
+          await adminCall({ action: 'set_mapping_active', staff_id: staffId, destination_key: destinationKey, active: !link.active });
+          showToast(`${destinationKey} topic mapping ${link.active ? 'paused' : 'enabled'}.`, 'success');
           await bootstrap(false);
         } catch (error) {
           showToast(error?.message || String(error), 'error');
@@ -199,6 +211,7 @@
           setBusy(button, false);
         }
       });
+    });
     });
   };
 
@@ -221,7 +234,11 @@
       <div class="data-table logs-table">
         <div class="data-row log-row data-head"><span>Time</span><span>Event</span><span>Destination</span><span>Status</span></div>
         ${state.logs.map((log) => {
-          const link = state.links.find((item) => item.staff_id && item.staff_id === log.staff_id);
+          const link = state.links.find((item) =>
+            item.staff_id &&
+            item.staff_id === log.staff_id &&
+            String(item.telegram_thread_id || '') === String(log.telegram_thread_id || '')
+          ) || state.links.find((item) => item.staff_id && item.staff_id === log.staff_id);
           const topicId = log.telegram_thread_id || link?.telegram_thread_id || null;
           const destination = link?.destination_label || (topicId ? `Topic ${topicId}` : 'Main group chat');
           return `
