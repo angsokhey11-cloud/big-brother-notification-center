@@ -21,6 +21,67 @@
     }
   };
 
+  async function discoverTelegramTopics(button){
+    const box = document.getElementById('topicDiscoveryResults');
+    if (!box) return;
+    setBusy(button, true, 'Checking…');
+    box.textContent = 'Reading recent Telegram topic messages…';
+    try {
+      await ensureSession();
+      const request = () => fetch(`${SUPABASE_URL}/functions/v1/bb-telegram-chat-id`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+        cache: 'no-store',
+      });
+      let response = await request();
+      if (response.status === 401) {
+        await refreshSession();
+        response = await request();
+      }
+      const data = await parseResponse(response);
+      const topics = Array.isArray(data.topics) ? [...data.topics].reverse() : [];
+      box.innerHTML = '';
+      if (!topics.length) {
+        box.textContent = data.instructions || 'No recent forum topics detected. Send one message inside the exact topic and try again.';
+        return;
+      }
+      const note = document.createElement('small');
+      note.textContent = 'Tap the correct topic to fill Group Chat ID + Topic ID automatically.';
+      box.appendChild(note);
+      const list = document.createElement('div');
+      list.style.display = 'grid';
+      list.style.gap = '6px';
+      list.style.marginTop = '8px';
+      topics.forEach((topic) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn secondary';
+        b.style.textAlign = 'left';
+        const topicName = topic.topic_name || `Topic ${topic.thread_id}`;
+        const groupName = topic.chat_title || String(topic.chat_id || 'Telegram group');
+        const preview = topic.last_message_preview ? ` · ${topic.last_message_preview}` : '';
+        b.textContent = `${groupName} → ${topicName} (#${topic.thread_id})${preview}`;
+        b.addEventListener('click', () => {
+          document.getElementById('mappingChatId').value = String(topic.chat_id || '');
+          document.getElementById('mappingThreadId').value = String(topic.thread_id || '');
+          const label = document.getElementById('mappingLabel');
+          if (label && !label.value.trim()) label.value = topicName;
+          showToast(`Selected ${topicName}.`, 'success');
+        });
+        list.appendChild(b);
+      });
+      box.appendChild(list);
+    } catch (error) {
+      box.textContent = error?.message || String(error);
+    } finally {
+      setBusy(button, false);
+    }
+  }
   openMappingDialog = function(existing = null){
     document.getElementById('mappingModal')?.remove();
 
@@ -67,6 +128,12 @@
             Topic ID
             <input id="mappingThreadId" inputmode="numeric" value="${escapeHtml(existing?.telegram_thread_id || '')}" placeholder="3" />
           </label>
+          <div class="reminder-box" style="margin:0;grid-column:1/-1">
+            <strong>Find Telegram Topic ID</strong>
+            <small>Send one message inside the exact Telegram topic first, then discover recent topics.</small>
+            <div style="margin-top:8px"><button type="button" class="btn secondary" id="discoverTopicsBtn">Discover Recent Topics</button></div>
+            <div id="topicDiscoveryResults" style="margin-top:8px"></div>
+          </div>
 
           <label>
             Topic Label
@@ -93,6 +160,7 @@
     const close = () => modal.remove();
     document.getElementById('mappingClose').addEventListener('click', close);
     document.getElementById('mappingCancel').addEventListener('click', close);
+    document.getElementById('discoverTopicsBtn').addEventListener('click', (event) => discoverTelegramTopics(event.currentTarget));
     modal.addEventListener('click', (event) => {
       if (event.target === modal) close();
     });
