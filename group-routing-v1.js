@@ -212,7 +212,6 @@
         }
       });
     });
-    });
   };
 
   renderLogs = function(){
