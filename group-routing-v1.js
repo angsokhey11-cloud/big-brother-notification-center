@@ -116,6 +116,7 @@
             <select id="mappingDestination" ${existing ? 'disabled' : ''} required>
               <option value="AR" ${(existing?.destination_key || 'AR') === 'AR' ? 'selected' : ''}>A/R — Receivable</option>
               <option value="STOCK" ${existing?.destination_key === 'STOCK' ? 'selected' : ''}>STOCK — Stock & Calculator Report</option>
+              <option value="DELIVERY" ${existing?.destination_key === 'DELIVERY' ? 'selected' : ''}>DELIVERY — Request Delivery</option>
             </select>
           </label>
 
@@ -142,7 +143,7 @@
 
           <div class="reminder-box" style="margin:0">
             <strong>How routing works</strong>
-            <small>A/R alerts use the A/R mapping only. Stock and Calculator Reports use the STOCK mapping only. One staff member can have both routes in the same Telegram group with different Topic IDs.</small>
+            <small>A/R alerts use the A/R mapping only. Stock and Calculator Reports use the STOCK mapping only. Delivery Request pictures use the DELIVERY mapping only. One staff member can use separate Topic IDs for all three routes, even inside the same Telegram group.</small>
           </div>
 
           <label class="check-line"><input id="mappingActive" type="checkbox" ${existing?.active === false ? '' : 'checked'} /> Active</label>
