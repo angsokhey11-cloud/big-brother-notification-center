@@ -529,6 +529,7 @@ function renderAll() {
   renderRules();
   renderLogs();
   window.BBCustomerInvoiceRouting?.render?.();
+  window.BBCustomerARRouting?.render?.();
   installSignOutButton();
 }
 
