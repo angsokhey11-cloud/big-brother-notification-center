@@ -362,7 +362,7 @@
       refreshCustomerRows();
     });
 
-    content.addEventListener('click',(event)=>{
+    content.onclick=(event)=>{
       const row=event.target.closest?.('.customer-route-row[data-customer-id]');
       if(!row)return;
 
@@ -381,7 +381,7 @@
       if(testButton){
         testCustomerRoute(customer,testButton);
       }
-    });
+    };
   }
 
   async function invoiceSendCall(payload,retry=true){
