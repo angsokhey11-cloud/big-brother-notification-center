@@ -57,20 +57,41 @@
 
       const data=await parseResponse(response);
       const topics=Array.isArray(data.topics)?[...data.topics].reverse():[];
+      const chats=Array.isArray(data.chats)?[...data.chats].reverse():[];
       box.innerHTML='';
 
-      if(!topics.length){
+      if(!topics.length && !chats.length){
         box.textContent=data.instructions||
-          'No recent topics detected. Send one message inside the exact customer topic and try again.';
+          'No recent Telegram destination detected. Send one message in the customer group/topic and try again.';
         return;
       }
 
       const note=document.createElement('small');
-      note.textContent='Tap the customer topic to fill Group Chat ID + Topic ID automatically.';
+      note.textContent='Tap the exact customer destination. Normal groups use no Topic ID; forum topics use their real Topic ID.';
       box.appendChild(note);
 
       const list=document.createElement('div');
       list.className='customer-topic-discovery-list';
+
+      chats
+        .filter(chat=>chat?.is_forum!==true)
+        .forEach(chat=>{
+          const item=document.createElement('button');
+          item.type='button';
+          item.className='btn secondary customer-topic-choice';
+          const groupName=chat.title||chat.first_name||String(chat.chat_id||'Telegram group');
+          item.textContent=groupName+' → Main group chat';
+          item.addEventListener('click',()=>{
+            document.getElementById('customerTelegramChatId').value=String(chat.chat_id||'');
+            document.getElementById('customerTelegramThreadId').value='';
+            const destination=document.getElementById('customerTelegramDestination');
+            if(destination&&!destination.value.trim()){
+              destination.value=groupName;
+            }
+            showToast('Selected '+groupName+' main group chat.','success');
+          });
+          list.appendChild(item);
+        });
 
       topics.forEach(topic=>{
         const item=document.createElement('button');
@@ -159,10 +180,10 @@
           </label>
 
           <div class="reminder-box customer-route-help">
-            <strong>Find Telegram Topic</strong>
-            <small>Send one message inside the customer's exact Telegram topic, then discover it here.</small>
+            <strong>Find Telegram Destination</strong>
+            <small>Send one message inside the customer's exact Telegram group or topic, then discover it here.</small>
             <div class="customer-topic-discovery-action">
-              <button type="button" class="btn secondary" id="customerDiscoverTopics">Discover Recent Topics</button>
+              <button type="button" class="btn secondary" id="customerDiscoverTopics">Discover Recent Destinations</button>
             </div>
             <div id="customerTopicDiscoveryResults" class="customer-topic-discovery-results"></div>
           </div>
@@ -285,7 +306,7 @@
           </span>
           <span class="row-actions">
             <button type="button" class="btn secondary customer-route-edit">Configure</button>
-            <button type="button" class="btn secondary customer-route-test" ${configured?'':'disabled'}>Test Topic</button>
+            <button type="button" class="btn secondary customer-route-test" ${configured?'':'disabled'}>Test Destination</button>
           </span>
         </div>`;
     }).join('');
