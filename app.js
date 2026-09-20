@@ -8,6 +8,7 @@ const pages = {
   staff: 'Staff Telegram Mapping',
   customers: 'Customer Invoice Routing',
   invoiceQueue: 'Invoice Queue',
+  arQueue: 'A/R Update Queue',
   rules: 'Notification Rules',
   logs: 'Delivery Logs',
 };
@@ -18,6 +19,7 @@ const RULE_ORDER = [
   'request_approved',
   'request_rejected',
   'customer_invoice_share',
+  'customer_ar_cleared',
 ];
 
 const navItems = document.querySelectorAll('.nav-item');
@@ -37,6 +39,7 @@ let state = {
   settings: [],
   logs: [],
   invoiceJobs: [],
+  arJobs: [],
 };
 
 function escapeHtml(value) {
@@ -542,6 +545,7 @@ async function bootstrap(showMessage = true) {
       settings: Array.isArray(data.settings) ? data.settings : [],
       logs: Array.isArray(data.logs) ? data.logs : [],
       invoiceJobs: Array.isArray(data.invoiceJobs) ? data.invoiceJobs : [],
+      arJobs: Array.isArray(data.arJobs) ? data.arJobs : [],
     };
     renderAll();
     document.getElementById('authGate')?.remove();
