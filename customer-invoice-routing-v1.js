@@ -232,26 +232,76 @@
     }
   }
 
-  function renderCustomers(){
-    const content=document.getElementById('customerInvoiceRoutingContent');
-    if(!content)return;
-
+  function filteredCustomers(){
     const customers=Array.isArray(state.customers)?state.customers:[];
-    const query=customerSearch.toLowerCase();
-    const filtered=customers.filter((customer)=>{
+    const query=clean(customerSearch).toLowerCase();
+
+    return customers.filter((customer)=>{
       if(customerEnabledOnly && !customer.telegram_send_invoice)return false;
       if(!query)return true;
+
       return [
         customer.customer_id,
         customer.customer_name,
         customer.phone,
+        customer.address,
         customer.location_code,
         customer.telegram_destination_name,
         customer.telegram_chat_id,
         customer.telegram_thread_id,
       ].some((value)=>clean(value).toLowerCase().includes(query));
     });
+  }
 
+  function customerRowsHtml(customers){
+    const filtered=filteredCustomers();
+
+    if(!filtered.length){
+      return '<div class="customer-route-empty">No customers match this search.</div>';
+    }
+
+    return filtered.map((customer)=>{
+      const configured=Boolean(customer.telegram_chat_id);
+      const enabled=customer.telegram_send_invoice===true;
+      const verified=Boolean(customer.telegram_verified_at);
+      const topic=customer.telegram_thread_id
+        ? 'Topic '+customer.telegram_thread_id
+        : (configured ? 'Main group chat' : '');
+
+      return `
+        <div class="data-row customer-route-row" data-customer-id="${escapeHtml(customer.customer_id)}">
+          <span>
+            <strong>${escapeHtml(customer.customer_name || customer.customer_id)}</strong>
+            <small>${escapeHtml(customer.customer_id)}${customer.location_code ? ' • '+escapeHtml(customer.location_code) : ''}</small>
+          </span>
+          <span>
+            <strong>${escapeHtml(customerRouteLabel(customer))}</strong>
+            <small>${escapeHtml(customer.telegram_chat_id_masked || '')}${topic ? ' • '+escapeHtml(topic) : ''}</small>
+          </span>
+          <span><span class="status-pill ${enabled?'success':'pending'}">${enabled?'Send Invoice ON':'OFF'}</span></span>
+          <span>
+            <span class="status-pill ${verified?'success':'pending'}">${verified?'Verified':(configured?'Not tested':'Not configured')}</span>
+            ${verified ? '<small>'+escapeHtml(formatTime(customer.telegram_verified_at))+'</small>' : ''}
+          </span>
+          <span class="row-actions">
+            <button type="button" class="btn secondary customer-route-edit">Configure</button>
+            <button type="button" class="btn secondary customer-route-test" ${configured?'':'disabled'}>Test Topic</button>
+          </span>
+        </div>`;
+    }).join('');
+  }
+
+  function refreshCustomerRows(){
+    const rows=document.getElementById('customerRouteRows');
+    if(!rows)return;
+    rows.innerHTML=customerRowsHtml(Array.isArray(state.customers)?state.customers:[]);
+  }
+
+  function renderCustomers(){
+    const content=document.getElementById('customerInvoiceRoutingContent');
+    if(!content)return;
+
+    const customers=Array.isArray(state.customers)?state.customers:[];
     const enabledCount=customers.filter((c)=>c.telegram_send_invoice).length;
     const verifiedCount=customers.filter((c)=>c.telegram_verified_at).length;
 
@@ -264,8 +314,18 @@
           <span><strong>${verifiedCount}</strong><small>Verified Routes</small></span>
         </div>
         <div class="customer-route-filters">
-          <input id="customerRouteSearch" type="search" placeholder="Search customer, ID, location or Telegram destination…" value="${escapeHtml(customerSearch)}" />
-          <label class="customer-enabled-filter"><input id="customerEnabledOnly" type="checkbox" ${customerEnabledOnly?'checked':''}> Enabled only</label>
+          <input
+            id="customerRouteSearch"
+            type="search"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Search customer, ID, phone, location or Telegram destination…"
+            value="${escapeHtml(customerSearch)}"
+          />
+          <label class="customer-enabled-filter">
+            <input id="customerEnabledOnly" type="checkbox" ${customerEnabledOnly?'checked':''}>
+            Enabled only
+          </label>
         </div>
       </div>
 
@@ -274,52 +334,53 @@
           <div class="data-row customer-route-row data-head">
             <span>Customer</span><span>Telegram Destination</span><span>Invoice Setting</span><span>Verification</span><span>Actions</span>
           </div>
-          ${filtered.length ? filtered.map((customer)=>{
-            const configured=Boolean(customer.telegram_chat_id);
-            const enabled=customer.telegram_send_invoice===true;
-            const verified=Boolean(customer.telegram_verified_at);
-            const topic=customer.telegram_thread_id ? 'Topic '+customer.telegram_thread_id : (configured ? 'Main group chat' : '');
-            return `
-              <div class="data-row customer-route-row" data-customer-id="${escapeHtml(customer.customer_id)}">
-                <span>
-                  <strong>${escapeHtml(customer.customer_name || customer.customer_id)}</strong>
-                  <small>${escapeHtml(customer.customer_id)}${customer.location_code ? ' • '+escapeHtml(customer.location_code) : ''}</small>
-                </span>
-                <span>
-                  <strong>${escapeHtml(customerRouteLabel(customer))}</strong>
-                  <small>${escapeHtml(customer.telegram_chat_id_masked || '')}${topic ? ' • '+escapeHtml(topic) : ''}</small>
-                </span>
-                <span><span class="status-pill ${enabled?'success':'pending'}">${enabled?'Send Invoice ON':'OFF'}</span></span>
-                <span>
-                  <span class="status-pill ${verified?'success':'pending'}">${verified?'Verified':(configured?'Not tested':'Not configured')}</span>
-                  ${verified ? '<small>'+escapeHtml(formatTime(customer.telegram_verified_at))+'</small>' : ''}
-                </span>
-                <span class="row-actions">
-                  <button type="button" class="btn secondary customer-route-edit">Configure</button>
-                  <button type="button" class="btn secondary customer-route-test" ${configured?'':'disabled'}>Test Topic</button>
-                </span>
-              </div>`;
-          }).join('') : `
-            <div class="customer-route-empty">No customers match this filter.</div>`}
+          <div id="customerRouteRows" class="customer-route-rows">
+            ${customerRowsHtml(customers)}
+          </div>
         </div>
       </div>`;
 
     const search=document.getElementById('customerRouteSearch');
+
+    /*
+     * Keep the real search input alive while the user types.
+     * Only refresh the customer rows; never rebuild the toolbar/input.
+     * This also avoids breaking IME/composition keyboards.
+     */
     search?.addEventListener('input',(event)=>{
       customerSearch=event.target.value||'';
-      renderCustomers();
-      document.getElementById('customerRouteSearch')?.focus();
-    });
-    document.getElementById('customerEnabledOnly')?.addEventListener('change',(event)=>{
-      customerEnabledOnly=event.target.checked===true;
-      renderCustomers();
+      refreshCustomerRows();
     });
 
-    content.querySelectorAll('.customer-route-row[data-customer-id]').forEach((row)=>{
-      const customer=customers.find((item)=>String(item.customer_id)===String(row.dataset.customerId));
+    search?.addEventListener('search',(event)=>{
+      customerSearch=event.target.value||'';
+      refreshCustomerRows();
+    });
+
+    document.getElementById('customerEnabledOnly')?.addEventListener('change',(event)=>{
+      customerEnabledOnly=event.target.checked===true;
+      refreshCustomerRows();
+    });
+
+    content.addEventListener('click',(event)=>{
+      const row=event.target.closest?.('.customer-route-row[data-customer-id]');
+      if(!row)return;
+
+      const customer=customers.find(
+        (item)=>String(item.customer_id)===String(row.dataset.customerId)
+      );
       if(!customer)return;
-      row.querySelector('.customer-route-edit')?.addEventListener('click',()=>openCustomerRouteDialog(customer));
-      row.querySelector('.customer-route-test')?.addEventListener('click',(event)=>testCustomerRoute(customer,event.currentTarget));
+
+      const editButton=event.target.closest?.('.customer-route-edit');
+      if(editButton){
+        openCustomerRouteDialog(customer);
+        return;
+      }
+
+      const testButton=event.target.closest?.('.customer-route-test');
+      if(testButton){
+        testCustomerRoute(customer,testButton);
+      }
     });
   }
 
