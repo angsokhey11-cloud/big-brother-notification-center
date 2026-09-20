@@ -23,8 +23,9 @@
       <nav class="nav" aria-label="Notification Center navigation">
         <button class="nav-item active" data-page="overview">Overview</button>
         <button class="nav-item" data-page="staff">Group Topics</button>
-        <button class="nav-item" data-page="customers">Customer Invoice Routing</button>
+        <button class="nav-item" data-page="customers">Customer Telegram Routing</button>
         <button class="nav-item" data-page="invoiceQueue">Invoice Queue</button>
+        <button class="nav-item" data-page="arQueue">A/R Update Queue</button>
         <button class="nav-item" data-page="rules">Notification Rules</button>
         <button class="nav-item" data-page="logs">Delivery Logs</button>
       </nav>
@@ -142,9 +143,9 @@
         <div class="panel section-card">
           <div class="section-head">
             <div>
-              <p class="eyebrow">CUSTOMER TELEGRAM INVOICES</p>
-              <h2>Customer Invoice Routing</h2>
-              <p>Choose exactly which customers receive invoice pictures and map each one to its Telegram group/topic.</p>
+              <p class="eyebrow">CUSTOMER TELEGRAM ROUTING</p>
+              <h2>Customer Telegram Routing</h2>
+              <p>Choose which customers receive invoice pictures and A/R cleared updates, using one verified Telegram group/topic destination.</p>
             </div>
           </div>
           <div id="customerInvoiceRoutingContent" class="empty-state">
@@ -172,6 +173,23 @@
         </div>
       </section>
 
+      <section class="page" id="page-arQueue">
+        <div class="panel section-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">CUSTOMER RECEIVABLE UPDATES</p>
+              <h2>A/R Update Queue</h2>
+              <p>Exact payment events confirmed by accounting. The bot sends cleared-invoice information and the customer's latest outstanding only after staff confirmation.</p>
+            </div>
+          </div>
+          <div id="arQueueContent" class="empty-state">
+            <div class="empty-icon">≡</div>
+            <h3>No A/R update jobs yet</h3>
+            <p>Eligible cleared receivables confirmed for Telegram will appear here.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="page" id="page-rules">
         <div class="panel section-card">
           <div class="section-head">
@@ -187,6 +205,7 @@
             <label class="rule-row"><div><strong>Approved result</strong><small>Post after admin approval.</small></div><input type="checkbox" checked disabled /></label>
             <label class="rule-row"><div><strong>Rejected result</strong><small>Post the rejection result and reason.</small></div><input type="checkbox" checked disabled /></label>
             <label class="rule-row"><div><strong>Customer invoice sharing</strong><small>Allow confirmed invoice pictures to be sent only to customers with Telegram Invoice enabled.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Customer A/R cleared updates</strong><small>After accounting fully clears an invoice, offer a Telegram update with the cleared invoice and latest customer outstanding.</small></div><input type="checkbox" checked disabled /></label>
           </div>
           <div class="reminder-box">
             <strong>Default overdue reminder plan</strong>
@@ -219,6 +238,7 @@
   <script src="app.js?v=20260920-telegraminvoice7"></script>
   <script src="group-routing-v1.js?v=20260919-3"></script>
   <script src="customer-invoice-routing-v1.js?v=20260920-telegraminvoice7"></script>
+  <script src="customer-ar-routing-v1.js?v=20260920-artelegram1"></script>
   <script src="overdue-v1.js?v=20260920-telegraminvoice7"></script>
 </body>
 </html>
