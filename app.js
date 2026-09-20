@@ -6,6 +6,8 @@ const ADMIN_FUNCTION = `${SUPABASE_URL}/functions/v1/bb-notification-admin`;
 const pages = {
   overview: 'Notification Center',
   staff: 'Staff Telegram Mapping',
+  customers: 'Customer Invoice Routing',
+  invoiceQueue: 'Invoice Queue',
   rules: 'Notification Rules',
   logs: 'Delivery Logs',
 };
@@ -15,6 +17,7 @@ const RULE_ORDER = [
   'request_submitted',
   'request_approved',
   'request_rejected',
+  'customer_invoice_share',
 ];
 
 const navItems = document.querySelectorAll('.nav-item');
@@ -28,10 +31,12 @@ let session = null;
 let state = {
   bot: null,
   staff: [],
+  customers: [],
   links: [],
   rules: [],
   settings: [],
   logs: [],
+  invoiceJobs: [],
 };
 
 function escapeHtml(value) {
@@ -520,6 +525,7 @@ function renderAll() {
   renderStaff();
   renderRules();
   renderLogs();
+  window.BBCustomerInvoiceRouting?.render?.();
   installSignOutButton();
 }
 
@@ -530,10 +536,12 @@ async function bootstrap(showMessage = true) {
     state = {
       bot: data.bot || null,
       staff: Array.isArray(data.staff) ? data.staff : [],
+      customers: Array.isArray(data.customers) ? data.customers : [],
       links: Array.isArray(data.links) ? data.links : [],
       rules: Array.isArray(data.rules) ? data.rules : [],
       settings: Array.isArray(data.settings) ? data.settings : [],
       logs: Array.isArray(data.logs) ? data.logs : [],
+      invoiceJobs: Array.isArray(data.invoiceJobs) ? data.invoiceJobs : [],
     };
     renderAll();
     document.getElementById('authGate')?.remove();
