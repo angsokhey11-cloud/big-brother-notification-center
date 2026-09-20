@@ -316,8 +316,12 @@
         <div class="customer-route-filters">
           <input
             id="customerRouteSearch"
-            type="search"
+            class="customer-route-search"
+            type="text"
+            role="searchbox"
+            enterkeyhint="search"
             autocomplete="off"
+            autocapitalize="none"
             spellcheck="false"
             placeholder="Search customer, ID, phone, location or Telegram destination…"
             value="${escapeHtml(customerSearch)}"
@@ -344,17 +348,58 @@
 
     /*
      * Keep the real search input alive while the user types.
-     * Only refresh the customer rows; never rebuild the toolbar/input.
-     * This also avoids breaking IME/composition keyboards.
+     * Preserve the caret explicitly because some browsers can move the
+     * cursor to the start when a nearby results container is replaced.
+     * IME/composition input is refreshed only after composition ends.
      */
-    search?.addEventListener('input',(event)=>{
-      customerSearch=event.target.value||'';
-      refreshCustomerRows();
+    let customerSearchComposing=false;
+
+    search?.addEventListener('compositionstart',()=>{
+      customerSearchComposing=true;
     });
 
-    search?.addEventListener('search',(event)=>{
+    search?.addEventListener('compositionend',(event)=>{
+      customerSearchComposing=false;
       customerSearch=event.target.value||'';
+
+      const start=event.target.selectionStart;
+      const end=event.target.selectionEnd;
+
       refreshCustomerRows();
+
+      requestAnimationFrame(()=>{
+        if(document.activeElement===event.target){
+          try{
+            event.target.setSelectionRange(
+              typeof start==='number'?start:event.target.value.length,
+              typeof end==='number'?end:event.target.value.length
+            );
+          }catch(_){}
+        }
+      });
+    });
+
+    search?.addEventListener('input',(event)=>{
+      customerSearch=event.target.value||'';
+      if(customerSearchComposing)return;
+
+      const input=event.target;
+      const start=input.selectionStart;
+      const end=input.selectionEnd;
+
+      refreshCustomerRows();
+
+      requestAnimationFrame(()=>{
+        if(document.activeElement!==input)return;
+
+        const fallback=input.value.length;
+        try{
+          input.setSelectionRange(
+            typeof start==='number'?start:fallback,
+            typeof end==='number'?end:fallback
+          );
+        }catch(_){}
+      });
     });
 
     document.getElementById('customerEnabledOnly')?.addEventListener('change',(event)=>{
