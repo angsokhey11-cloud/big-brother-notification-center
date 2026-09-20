@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b1220" />
   <title>BIG BROTHER • Notification Center</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260920-telegraminvoice1" />
+  <link rel="stylesheet" href="admin.css?v=20260920-telegraminvoice1" />
+  <link rel="stylesheet" href="customer-invoice-routing-v1.css?v=20260920-telegraminvoice1" />
 </head>
 <body>
   <div class="app-shell">
@@ -21,6 +23,8 @@
       <nav class="nav" aria-label="Notification Center navigation">
         <button class="nav-item active" data-page="overview">Overview</button>
         <button class="nav-item" data-page="staff">Group Topics</button>
+        <button class="nav-item" data-page="customers">Customer Invoice Routing</button>
+        <button class="nav-item" data-page="invoiceQueue">Invoice Queue</button>
         <button class="nav-item" data-page="rules">Notification Rules</button>
         <button class="nav-item" data-page="logs">Delivery Logs</button>
       </nav>
@@ -134,6 +138,40 @@
         </div>
       </section>
 
+      <section class="page" id="page-customers">
+        <div class="panel section-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">CUSTOMER TELEGRAM INVOICES</p>
+              <h2>Customer Invoice Routing</h2>
+              <p>Choose exactly which customers receive invoice pictures and map each one to its Telegram group/topic.</p>
+            </div>
+          </div>
+          <div id="customerInvoiceRoutingContent" class="empty-state">
+            <div class="empty-icon">✈</div>
+            <h3>Loading customer routes…</h3>
+            <p>Customer Telegram routing will appear here.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-invoiceQueue">
+        <div class="panel section-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">TELEGRAM INVOICE DELIVERY</p>
+              <h2>Invoice Queue</h2>
+              <p>Exact invoice jobs created after accounting confirms Send Invoice. The bot never scans customers to guess what to send.</p>
+            </div>
+          </div>
+          <div id="invoiceQueueContent" class="empty-state">
+            <div class="empty-icon">≡</div>
+            <h3>No invoice jobs yet</h3>
+            <p>Completed invoices confirmed for Telegram will appear here.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="page" id="page-rules">
         <div class="panel section-card">
           <div class="section-head">
@@ -148,6 +186,7 @@
             <label class="rule-row"><div><strong>Request submitted confirmation</strong><small>Post when the staff request reaches the system.</small></div><input type="checkbox" checked disabled /></label>
             <label class="rule-row"><div><strong>Approved result</strong><small>Post after admin approval.</small></div><input type="checkbox" checked disabled /></label>
             <label class="rule-row"><div><strong>Rejected result</strong><small>Post the rejection result and reason.</small></div><input type="checkbox" checked disabled /></label>
+            <label class="rule-row"><div><strong>Customer invoice sharing</strong><small>Allow confirmed invoice pictures to be sent only to customers with Telegram Invoice enabled.</small></div><input type="checkbox" checked disabled /></label>
           </div>
           <div class="reminder-box">
             <strong>Default overdue reminder plan</strong>
@@ -177,8 +216,9 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260920-telegraminvoice1"></script>
   <script src="group-routing-v1.js?v=20260919-3"></script>
-  <script src="overdue-v1.js"></script>
+  <script src="customer-invoice-routing-v1.js?v=20260920-telegraminvoice1"></script>
+  <script src="overdue-v1.js?v=20260920-telegraminvoice1"></script>
 </body>
 </html>
