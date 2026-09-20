@@ -173,3 +173,11 @@
 .customer-topic-discovery-results{margin-top:9px;color:#7f93aa;font-size:10px;line-height:1.45}
 .customer-topic-discovery-list{display:grid;gap:6px;margin-top:8px}
 .customer-topic-choice{text-align:left;width:100%;white-space:normal;line-height:1.35}
+
+
+.customer-routing-flags{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+}
