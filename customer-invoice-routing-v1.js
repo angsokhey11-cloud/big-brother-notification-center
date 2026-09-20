@@ -67,20 +67,19 @@
       }
 
       const note=document.createElement('small');
-      note.textContent='Tap the exact customer destination. Normal groups use no Topic ID; forum topics use their real Topic ID.';
+      note.textContent='Tap the exact customer destination. Group-only delivery uses no Topic ID. Choose a topic only when you want invoices isolated inside that topic.';
       box.appendChild(note);
 
       const list=document.createElement('div');
       list.className='customer-topic-discovery-list';
 
       chats
-        .filter(chat=>chat?.is_forum!==true)
         .forEach(chat=>{
           const item=document.createElement('button');
           item.type='button';
           item.className='btn secondary customer-topic-choice';
           const groupName=chat.title||chat.first_name||String(chat.chat_id||'Telegram group');
-          item.textContent=groupName+' → Main group chat';
+          item.textContent=groupName+' → '+(chat?.is_forum===true?'General group chat':'Main group chat');
           item.addEventListener('click',()=>{
             document.getElementById('customerTelegramChatId').value=String(chat.chat_id||'');
             document.getElementById('customerTelegramThreadId').value='';
@@ -88,7 +87,10 @@
             if(destination&&!destination.value.trim()){
               destination.value=groupName;
             }
-            showToast('Selected '+groupName+' main group chat.','success');
+            showToast(
+              'Selected '+groupName+(chat?.is_forum===true?' general group chat.':' main group chat.'),
+              'success'
+            );
           });
           list.appendChild(item);
         });
@@ -161,7 +163,7 @@
           </label>
 
           <label>
-            Telegram Topic ID
+            Telegram Topic ID (Optional)
             <input
               id="customerTelegramThreadId"
               inputmode="numeric"
@@ -190,7 +192,7 @@
 
           <div class="reminder-box customer-route-help">
             <strong>Exact routing</strong>
-            <small>Group Chat ID identifies the Telegram group. Topic ID identifies the exact forum topic. Leave Topic ID blank only when invoices should go to the main group chat.</small>
+            <small>Group Chat ID identifies the Telegram group. Topic ID identifies the exact forum topic. Leave Topic ID blank to send invoices to the group main/general chat.</small>
           </div>
 
           <div class="modal-actions">
