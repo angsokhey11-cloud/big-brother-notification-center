@@ -68,3 +68,19 @@ The current UI is a standalone foundation with:
 - Delivery Logs
 
 The next implementation step is a secure authenticated admin API/Edge Function that supplies live data to this page without exposing service credentials or Telegram secrets.
+
+
+## Customer Telegram invoice delivery
+
+The Notification Center also manages customer-specific invoice delivery:
+
+- Customer Telegram invoice routing by stable `customer_id`
+- Per-customer Send Invoice ON / OFF
+- Exact Group Chat ID + Topic ID
+- Destination verification tests
+- Exact invoice job queue (no customer/latest-invoice scanning)
+- PAID / PARTIAL / CREDIT status from the saved accounting invoice
+- Private PNG snapshot storage for safe retry
+- Failed delivery retry and delivery history
+
+Invoice sending remains notification-only. The bot cannot edit invoices, payments, or receivables.
