@@ -6,7 +6,7 @@ const ADMIN_FUNCTION = `${SUPABASE_URL}/functions/v1/bb-notification-admin`;
 const pages = {
   overview: 'Notification Center',
   staff: 'Staff Telegram Mapping',
-  customers: 'Customer Invoice Routing',
+  customers: 'Customer Telegram Routing',
   invoiceQueue: 'Invoice Queue',
   arQueue: 'A/R Update Queue',
   rules: 'Notification Rules',
