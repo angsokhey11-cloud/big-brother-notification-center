@@ -5,6 +5,8 @@
   pages.customers = 'Customer Invoice Routing';
   pages.invoiceQueue = 'Invoice Queue';
 
+  const INVOICE_SEND_FUNCTION = SUPABASE_URL + '/functions/v1/bb-telegram-invoice-send';
+
   let customerSearch = '';
   let customerEnabledOnly = false;
 
@@ -234,6 +236,44 @@
     });
   }
 
+  async function invoiceSendCall(payload,retry=true){
+    await ensureSession();
+    const request=()=>fetch(INVOICE_SEND_FUNCTION,{
+      method:'POST',
+      headers:{
+        apikey:SUPABASE_KEY,
+        Authorization:'Bearer '+session.access_token,
+        'Content-Type':'application/json'
+      },
+      body:JSON.stringify(payload||{}),
+      cache:'no-store'
+    });
+
+    let response=await request();
+    if(response.status===401&&retry){
+      await refreshSession();
+      response=await request();
+    }
+    return parseResponse(response);
+  }
+
+  async function retryInvoiceJob(job,button){
+    setBusy(button,true,'Retrying…');
+    try{
+      await invoiceSendCall({
+        action:'retry',
+        job_id:job.job_id
+      });
+      showToast('Invoice sent successfully on retry.','success');
+      await bootstrap(false);
+    }catch(error){
+      showToast(error?.message||String(error),'error');
+      await bootstrap(false).catch(()=>{});
+    }finally{
+      setBusy(button,false);
+    }
+  }
+
   async function cancelInvoiceJob(job,button){
     if(!confirm('Cancel Telegram invoice job '+job.invoice_no_snapshot+'?'))return;
     setBusy(button,true,'Cancelling…');
@@ -289,6 +329,7 @@
                   ${job.sent_at?'<small>'+escapeHtml(formatTime(job.sent_at))+'</small>':''}
                 </span>
                 <span class="row-actions">
+                  ${job.status==='failed'?'<button type="button" class="btn primary invoice-job-retry">Retry</button>':''}
                   ${['pending','failed'].includes(job.status)?'<button type="button" class="btn secondary invoice-job-cancel">Cancel</button>':''}
                 </span>
               </div>`;
@@ -299,6 +340,7 @@
     content.querySelectorAll('.invoice-queue-row[data-job-id]').forEach((row)=>{
       const job=jobs.find((item)=>String(item.job_id)===String(row.dataset.jobId));
       if(!job)return;
+      row.querySelector('.invoice-job-retry')?.addEventListener('click',(event)=>retryInvoiceJob(job,event.currentTarget));
       row.querySelector('.invoice-job-cancel')?.addEventListener('click',(event)=>cancelInvoiceJob(job,event.currentTarget));
     });
   }
