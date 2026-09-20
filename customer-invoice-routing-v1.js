@@ -6,6 +6,7 @@
   pages.invoiceQueue = 'Invoice Queue';
 
   const INVOICE_SEND_FUNCTION = SUPABASE_URL + '/functions/v1/bb-telegram-invoice-send';
+  const TOPIC_DISCOVERY_FUNCTION = SUPABASE_URL + '/functions/v1/bb-telegram-chat-id';
 
   let customerSearch = '';
   let customerEnabledOnly = false;
@@ -26,6 +27,80 @@
     if(!customer?.telegram_chat_id)return 'Not configured';
     return clean(customer.telegram_destination_name) ||
       (customer.telegram_thread_id ? 'Topic '+customer.telegram_thread_id : 'Main group chat');
+  }
+
+  async function discoverCustomerTopics(button){
+    const box=document.getElementById('customerTopicDiscoveryResults');
+    if(!box)return;
+
+    setBusy(button,true,'Checking…');
+    box.textContent='Reading recent Telegram group topics…';
+
+    try{
+      await ensureSession();
+      const request=()=>fetch(TOPIC_DISCOVERY_FUNCTION,{
+        method:'POST',
+        headers:{
+          apikey:SUPABASE_KEY,
+          Authorization:'Bearer '+session.access_token,
+          'Content-Type':'application/json'
+        },
+        body:'{}',
+        cache:'no-store'
+      });
+
+      let response=await request();
+      if(response.status===401){
+        await refreshSession();
+        response=await request();
+      }
+
+      const data=await parseResponse(response);
+      const topics=Array.isArray(data.topics)?[...data.topics].reverse():[];
+      box.innerHTML='';
+
+      if(!topics.length){
+        box.textContent=data.instructions||
+          'No recent topics detected. Send one message inside the exact customer topic and try again.';
+        return;
+      }
+
+      const note=document.createElement('small');
+      note.textContent='Tap the customer topic to fill Group Chat ID + Topic ID automatically.';
+      box.appendChild(note);
+
+      const list=document.createElement('div');
+      list.className='customer-topic-discovery-list';
+
+      topics.forEach(topic=>{
+        const item=document.createElement('button');
+        item.type='button';
+        item.className='btn secondary customer-topic-choice';
+
+        const topicName=topic.topic_name||('Topic '+topic.thread_id);
+        const groupName=topic.chat_title||String(topic.chat_id||'Telegram group');
+        const preview=topic.last_message_preview?' · '+topic.last_message_preview:'';
+
+        item.textContent=groupName+' → '+topicName+' (#'+topic.thread_id+')'+preview;
+        item.addEventListener('click',()=>{
+          document.getElementById('customerTelegramChatId').value=String(topic.chat_id||'');
+          document.getElementById('customerTelegramThreadId').value=String(topic.thread_id||'');
+          const destination=document.getElementById('customerTelegramDestination');
+          if(destination&&!destination.value.trim()){
+            destination.value=topicName;
+          }
+          showToast('Selected '+topicName+'.','success');
+        });
+
+        list.appendChild(item);
+      });
+
+      box.appendChild(list);
+    }catch(error){
+      box.textContent=error?.message||String(error);
+    }finally{
+      setBusy(button,false);
+    }
   }
 
   function openCustomerRouteDialog(customer){
@@ -84,6 +159,15 @@
           </label>
 
           <div class="reminder-box customer-route-help">
+            <strong>Find Telegram Topic</strong>
+            <small>Send one message inside the customer's exact Telegram topic, then discover it here.</small>
+            <div class="customer-topic-discovery-action">
+              <button type="button" class="btn secondary" id="customerDiscoverTopics">Discover Recent Topics</button>
+            </div>
+            <div id="customerTopicDiscoveryResults" class="customer-topic-discovery-results"></div>
+          </div>
+
+          <div class="reminder-box customer-route-help">
             <strong>Exact routing</strong>
             <small>Group Chat ID identifies the Telegram group. Topic ID identifies the exact forum topic. Leave Topic ID blank only when invoices should go to the main group chat.</small>
           </div>
@@ -101,6 +185,9 @@
     const close=()=>modal.remove();
     document.getElementById('customerRouteClose').addEventListener('click',close);
     document.getElementById('customerRouteCancel').addEventListener('click',close);
+    document.getElementById('customerDiscoverTopics')?.addEventListener('click',(event)=>{
+      discoverCustomerTopics(event.currentTarget);
+    });
     modal.addEventListener('click',(event)=>{if(event.target===modal)close()});
 
     document.getElementById('customerRouteForm').addEventListener('submit',async(event)=>{
