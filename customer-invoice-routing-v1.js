@@ -6,6 +6,7 @@
   pages.invoiceQueue = 'Invoice Queue';
 
   const INVOICE_SEND_FUNCTION = SUPABASE_URL + '/functions/v1/bb-telegram-invoice-send';
+  const AR_SEND_FUNCTION = SUPABASE_URL + '/functions/v1/bb-telegram-ar-update';
   const TOPIC_DISCOVERY_FUNCTION = SUPABASE_URL + '/functions/v1/bb-telegram-chat-id';
 
   let customerSearch = '';
@@ -136,7 +137,7 @@
       <div class="modal-card customer-route-modal">
         <div class="section-head">
           <div>
-            <p class="eyebrow">CUSTOMER TELEGRAM INVOICE</p>
+            <p class="eyebrow">CUSTOMER TELEGRAM ROUTING</p>
             <h3>${escapeHtml(customer.customer_name || customer.customer_id)}</h3>
             <p class="hint">${escapeHtml(customer.customer_id)}${customer.location_code ? ' • '+escapeHtml(customer.location_code) : ''}</p>
           </div>
@@ -149,6 +150,14 @@
             <span>
               <strong>Send Invoice to Telegram</strong>
               <small>After accounting completes this customer's invoice, BIG BROTHER will offer a Send Invoice confirmation.</small>
+            </span>
+          </label>
+
+          <label class="check-line customer-send-toggle">
+            <input id="customerSendAR" type="checkbox" ${customer.telegram_send_ar_update ? 'checked' : ''} />
+            <span>
+              <strong>Send A/R Cleared Update</strong>
+              <small>When a successful receivable payment fully clears an invoice, BIG BROTHER will offer a customer A/R update confirmation.</small>
             </span>
           </label>
 
@@ -224,12 +233,13 @@
           action:'save_customer_invoice_route',
           customer_id:customer.customer_id,
           telegram_send_invoice:document.getElementById('customerSendInvoice').checked,
+          telegram_send_ar_update:document.getElementById('customerSendAR').checked,
           telegram_chat_id:document.getElementById('customerTelegramChatId').value,
           telegram_thread_id:document.getElementById('customerTelegramThreadId').value,
           telegram_destination_name:document.getElementById('customerTelegramDestination').value,
         });
         close();
-        showToast('Customer Telegram invoice route saved.','success');
+        showToast('Customer Telegram route saved.','success');
         await bootstrap(false);
       }catch(error){
         errorBox.textContent=error?.message||String(error);
@@ -260,7 +270,11 @@
     const query=clean(customerSearch).toLowerCase();
 
     return customers.filter((customer)=>{
-      if(customerEnabledOnly && !customer.telegram_send_invoice)return false;
+      if(
+        customerEnabledOnly &&
+        !customer.telegram_send_invoice &&
+        !customer.telegram_send_ar_update
+      )return false;
       if(!query)return true;
 
       return [
@@ -285,7 +299,8 @@
 
     return filtered.map((customer)=>{
       const configured=Boolean(customer.telegram_chat_id);
-      const enabled=customer.telegram_send_invoice===true;
+      const invoiceEnabled=customer.telegram_send_invoice===true;
+      const arEnabled=customer.telegram_send_ar_update===true;
       const verified=Boolean(customer.telegram_verified_at);
       const topic=customer.telegram_thread_id
         ? 'Topic '+customer.telegram_thread_id
@@ -301,7 +316,10 @@
             <strong>${escapeHtml(customerRouteLabel(customer))}</strong>
             <small>${escapeHtml(customer.telegram_chat_id_masked || '')}${topic ? ' • '+escapeHtml(topic) : ''}</small>
           </span>
-          <span><span class="status-pill ${enabled?'success':'pending'}">${enabled?'Send Invoice ON':'OFF'}</span></span>
+          <span class="customer-routing-flags">
+            <span class="status-pill ${invoiceEnabled?'success':'pending'}">${invoiceEnabled?'Invoice ON':'Invoice OFF'}</span>
+            <span class="status-pill ${arEnabled?'success':'pending'}">${arEnabled?'A/R ON':'A/R OFF'}</span>
+          </span>
           <span>
             <span class="status-pill ${verified?'success':'pending'}">${verified?'Verified':(configured?'Not tested':'Not configured')}</span>
             ${verified ? '<small>'+escapeHtml(formatTime(customer.telegram_verified_at))+'</small>' : ''}
@@ -326,6 +344,7 @@
 
     const customers=Array.isArray(state.customers)?state.customers:[];
     const enabledCount=customers.filter((c)=>c.telegram_send_invoice).length;
+    const arEnabledCount=customers.filter((c)=>c.telegram_send_ar_update).length;
     const verifiedCount=customers.filter((c)=>c.telegram_verified_at).length;
 
     content.className='customer-routing-wrap';
@@ -334,6 +353,7 @@
         <div class="customer-route-stats">
           <span><strong>${customers.length}</strong><small>Customers</small></span>
           <span><strong>${enabledCount}</strong><small>Send Invoice ON</small></span>
+          <span><strong>${arEnabledCount}</strong><small>Send A/R Update ON</small></span>
           <span><strong>${verifiedCount}</strong><small>Verified Routes</small></span>
         </div>
         <div class="customer-route-filters">
@@ -359,7 +379,7 @@
       <div class="customer-table-wrap">
         <div class="data-table customer-route-table">
           <div class="data-row customer-route-row data-head">
-            <span>Customer</span><span>Telegram Destination</span><span>Invoice Setting</span><span>Verification</span><span>Actions</span>
+            <span>Customer</span><span>Telegram Destination</span><span>Customer Notifications</span><span>Verification</span><span>Actions</span>
           </div>
           <div id="customerRouteRows" class="customer-route-rows">
             ${customerRowsHtml(customers)}
