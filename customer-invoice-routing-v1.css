@@ -1,0 +1,169 @@
+/* BIG BROTHER Notification Center — Customer Invoice Routing V1 */
+
+.customer-routing-wrap,
+.invoice-queue-wrap{
+  display:grid;
+  gap:14px;
+}
+
+.customer-route-toolbar{
+  display:grid;
+  gap:12px;
+}
+
+.customer-route-stats{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+
+.customer-route-stats > span{
+  min-width:140px;
+  border:1px solid var(--border);
+  border-radius:13px;
+  background:rgba(255,255,255,.02);
+  padding:12px 14px;
+}
+
+.customer-route-stats strong,
+.customer-route-stats small{
+  display:block;
+}
+
+.customer-route-stats strong{
+  color:#e4eef9;
+  font-size:18px;
+}
+
+.customer-route-stats small{
+  margin-top:3px;
+  color:#71869e;
+  font-size:10px;
+}
+
+.customer-route-filters{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+}
+
+.customer-route-filters input[type="search"]{
+  width:100%;
+  min-height:44px;
+  border:1px solid rgba(148,163,184,.22);
+  border-radius:11px;
+  background:#081426;
+  color:#e8eef8;
+  padding:10px 12px;
+  outline:none;
+}
+
+.customer-route-filters input[type="search"]:focus{
+  border-color:rgba(53,167,255,.58);
+  box-shadow:0 0 0 3px rgba(53,167,255,.08);
+}
+
+.customer-enabled-filter{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#aebed1;
+  font-size:11px;
+  font-weight:800;
+  white-space:nowrap;
+}
+
+.customer-enabled-filter input{
+  width:17px;
+  height:17px;
+  accent-color:var(--primary);
+}
+
+.customer-table-wrap,
+.invoice-queue-table-wrap{
+  overflow:auto;
+  border:1px solid var(--border);
+  border-radius:16px;
+}
+
+.customer-route-table{
+  min-width:980px;
+}
+
+.customer-route-row{
+  grid-template-columns:
+    minmax(190px,1.1fr)
+    minmax(220px,1.25fr)
+    minmax(130px,.7fr)
+    minmax(150px,.8fr)
+    minmax(190px,.9fr);
+}
+
+.invoice-queue-table{
+  min-width:1150px;
+}
+
+.invoice-queue-row{
+  grid-template-columns:
+    minmax(150px,.8fr)
+    minmax(190px,1fr)
+    minmax(190px,1fr)
+    minmax(200px,1fr)
+    minmax(150px,.8fr)
+    minmax(110px,.55fr);
+}
+
+.customer-route-empty{
+  padding:34px 18px;
+  color:#768ba3;
+  font-size:12px;
+  text-align:center;
+}
+
+.customer-route-modal{
+  width:min(560px,100%);
+}
+
+.customer-send-toggle{
+  margin:0 0 6px !important;
+  padding:14px;
+  border:1px solid rgba(53,167,255,.16);
+  border-radius:13px;
+  background:rgba(53,167,255,.05);
+}
+
+.customer-send-toggle span{
+  display:grid;
+  gap:4px;
+}
+
+.customer-send-toggle strong{
+  color:#e0ebf8;
+  font-size:12px;
+}
+
+.customer-send-toggle small{
+  color:#7f93aa;
+  font-size:10px;
+  line-height:1.4;
+}
+
+.customer-route-help{
+  margin:12px 0 0;
+}
+
+.invoice-queue-stats{
+  margin-bottom:0;
+}
+
+@media(max-width:760px){
+  .customer-route-filters{
+    grid-template-columns:1fr;
+  }
+
+  .customer-route-stats > span{
+    flex:1 1 120px;
+    min-width:0;
+  }
+}
