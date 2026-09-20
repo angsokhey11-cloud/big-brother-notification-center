@@ -48,7 +48,7 @@
   align-items:center;
 }
 
-.customer-route-filters input[type="search"]{
+.customer-route-filters .customer-route-search{
   width:100%;
   min-height:44px;
   border:1px solid rgba(148,163,184,.22);
@@ -59,7 +59,7 @@
   outline:none;
 }
 
-.customer-route-filters input[type="search"]:focus{
+.customer-route-filters .customer-route-search:focus{
   border-color:rgba(53,167,255,.58);
   box-shadow:0 0 0 3px rgba(53,167,255,.08);
 }
