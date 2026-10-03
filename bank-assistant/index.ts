@@ -1,6 +1,4 @@
-// BIG BROTHER Bank Assistant — isolated Telegram webhook.
-// Inactive unless TELEGRAM_BANK_ASSISTANT_CHAT_ID, TELEGRAM_BANK_ASSISTANT_WEBHOOK_SECRET,
-// TELEGRAM_BANK_ASSISTANT_ADMIN_IDS and existing TELEGRAM_BOT_TOKEN are configured.
+// BIG BROTHER: inbound Telegram dispatcher. Topic routing and webhook authentication are configured in Supabase.
 // Never stores incoming messages, slips, conversations or match suggestions.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -12,7 +10,7 @@ const escape=(x:unknown)=>val(x).replace(/[&<>]/g,(c)=>({"&":"&amp;","<":"&lt;",
 type Bank={identity_id:number,customer_id:string,bank_name:string,account_holder_name:string,account_number:string|null,alternative_names:string[],active:boolean};
 type Customer={customer_id:string,customer_name:string};
 type Invoice={invoice_id:string,invoice_no:string,currency:string,outstanding:number};
-const allowed=(id:unknown)=>val(Deno.env.get("TELEGRAM_BANK_ASSISTANT_ADMIN_IDS")).split(",").map(s=>s.trim()).filter(Boolean).includes(val(id));
+const allowed=async(id:unknown)=>{if(!val(id))return false;const {data,error}=await db().from("bb_telegram_assistant_admins").select("telegram_user_id").eq("telegram_user_id",val(id)).maybeSingle();return !error&&!!data;};
 async function inBankTopic(m:any){
  if(!m?.chat?.id||!Number.isSafeInteger(Number(m.message_thread_id)))return false;
  const {data,error}=await db().from("bb_telegram_assistant_routes").select("telegram_chat_id,telegram_thread_id,active").eq("assistant_key","bank_assistant").eq("active",true).maybeSingle();
@@ -107,7 +105,7 @@ async function handle(m:any){
  const t=val(m.text||m.caption);
  if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nForward bank notifications to this group to identify customers and inspect possible A/R matches.\nTo teach me an identity, reply with:\n<code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>\nAdmin confirmation is required. No conversations are stored.");
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)){
-  if(!allowed(m.from?.id))return reply(m,"Only authorized Telegram administrators may add bank identities.");
+  if(!await allowed(m.from?.id))return reply(m,"Only authorized Telegram administrators may add bank identities.");
   const data=addCmd(t);
   if(!data)return reply(m,"Format: <code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>");
   const {data:c}=await db().from("customers").select("customer_id,customer_name").eq("customer_id",data.customer).eq("active",true).maybeSingle();
@@ -123,7 +121,7 @@ async function handle(m:any){
 }
 async function callback(cb:any){
  const m=cb.message,choice=val(cb.data),id=cb.id;
- if(!m||!allowed(cb.from?.id)){await tg("answerCallbackQuery",{callback_query_id:id,text:"Only approved administrators can save bank identities.",show_alert:true});return;}
+ if(!m||!await allowed(cb.from?.id)){await tg("answerCallbackQuery",{callback_query_id:id,text:"Only approved administrators can save bank identities.",show_alert:true});return;}
  if(choice==="bbbank:cancel"){await tg("answerCallbackQuery",{callback_query_id:id,text:"Cancelled."});return;}
  if(choice!=="bbbank:confirm")return;
  const t=val(m.text);
@@ -141,13 +139,14 @@ async function callback(cb:any){
 }
 Deno.serve(async(req:Request)=>{
  if(req.method!=="POST")return new Response("Method not allowed",{status:405});
- const secret=val(Deno.env.get("TELEGRAM_BANK_ASSISTANT_WEBHOOK_SECRET"));
- if(!secret||!token()||!val(Deno.env.get("TELEGRAM_BANK_ASSISTANT_ADMIN_IDS")))return new Response("Bank Assistant is not configured",{status:503});
- if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==secret)return new Response("Unauthorized",{status:401});
+ if(!token())return new Response("Bot not configured",{status:503});
+ const {data:cfg,error}=await db().from("bb_telegram_inbound_config").select("secret").eq("config_key","telegram_main").maybeSingle();
+ if(error||!cfg?.secret)return new Response("Webhook not configured",{status:503});
+ if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==cfg.secret)return new Response("Unauthorized",{status:401});
  try{
-  const u=await req.json(),m=u.message||u.edited_message;
+  const u=await req.json(),m=u.message;
   if(m&&await inBankTopic(m))await handle(m);
   if(u.callback_query&&await inBankTopic(u.callback_query.message))await callback(u.callback_query);
   return Response.json({ok:true});
- }catch(e){console.error("Bank Assistant request failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
+ }catch(e){console.error("Incoming Telegram handling failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
 });
