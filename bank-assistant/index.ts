@@ -26,16 +26,14 @@ async function reply(m:any,html:string,extra:Record<string,unknown>={}){
 function parseNotice(raw:string){
  const t=raw.slice(0,4500);
  const grab=(patterns:RegExp[])=>{for(const p of patterns){const x=t.match(p);if(x?.[1])return x[1].trim();}return "";};
- // ABA PayWay: "៛208,800 paid by Tan Rothdara (*323) on ... via ABA KHQR (...) at Big Brother by S.ANG. Trx. ID: ..."
- // 'via ABA KHQR' describes the payment rail/receiving channel; it does NOT establish the sender's bank.
- const payway=t.match(/(?:៛|KHR\b|\bUSD\b|US\$|\$)\s*([\d,]+(?:\.\d{1,4})?)\s+paid\s+by\s+(.+?)\s*\(\s*([*xX•]*\s*\d{2,8})\s*\)\s+on\b/i);
+ // ABA PayWay: sender name is useful; masked account suffix is deliberately discarded.
+ // "via ABA KHQR" is a payment channel, NOT a verified sender bank.
+ const payway=t.match(/(?:៛|KHR\b|\bUSD\b|US\$|\$)\s*([\d,]+(?:\.\d{1,4})?)\s+paid\s+by\s+(.+?)\s*\(\s*[*xX•]*\s*\d{2,8}\s*\)\s+on\b/i);
  const sender=payway?.[2]?.trim()||grab([/(?:sender|from|payer|account holder|received from|ឈ្មោះអ្នកផ្ញើ)\s*[:：\-]\s*([^\n\r]+)/i,/(?:sent by|transfer from)\s+([^\n\r]+)/i]);
- const account=payway?.[3]?.replace(/\s+/g,"")||grab([/(?:sender account|from account|payer account|account no\.?|account number)\s*[:：\-]\s*([\d*xX•\- ]{2,28})/i]);
  const currency=payway?( /^\s*(?:៛|KHR\b)/i.test(t)?"KHR":"USD" ):/(?:៛|\bKHR\b|\briel\b)/i.test(t)?"KHR":/(?:\bUSD\b|US\$|\$|\bdollar\b)/i.test(t)?"USD":"";
  const rawAmount=payway?.[1]||grab([/(?:amount|received|payment|transfer amount|ចំនួនទឹកប្រាក់)\s*[:：\-]?\s*(?:USD|KHR|US\$|\$|៛)?\s*([\d,]+(?:\.\d{1,4})?)/i,/(?:USD|US\$|\$|KHR|៛)\s*([\d,]+(?:\.\d{1,4})?)/i]);
  const tx=grab([/\bTrx\.?\s*ID\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i,/(?:transaction\s*(?:id|number|no\.?|ref(?:erence)?)|reference\s*(?:id|no\.?|number))\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i]);
- const bank=grab([/(?:sender bank|from bank|source bank)\s*[:：\-]\s*([^\n\r]+)/i]);
- return {sender,account:val(account).replace(/[\s-]+/g,""),currency,amount:rawAmount?amount(rawAmount):null,transactionId:tx,bank,channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):""};
+ return {sender,currency,amount:rawAmount?amount(rawAmount):null,transactionId:tx,channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):""};
 }
 function combos(rows:Invoice[],sum:number,currency:string){
  const exact=rows.filter(x=>norm(x.currency)===norm(currency)&&Number(x.outstanding)>0.000001).slice(0,16);
@@ -52,7 +50,6 @@ function combos(rows:Invoice[],sum:number,currency:string){
 }
 function noticeDetails(n:ReturnType<typeof parseNotice>){
  let result="\nPayer: <b>"+escape(n.sender||"Not shown")+"</b>";
- if(n.account)result+="\nMasked account: "+escape(n.account);
  if(n.currency&&n.amount!==null)result+="\nAmount: "+escape(n.currency)+" "+escape(n.amount.toLocaleString("en-US",{maximumFractionDigits:2}));
  if(n.transactionId)result+="\nTransaction ID: "+escape(n.transactionId);
  if(n.channel)result+="\nPayment channel: "+escape(n.channel)+" (not verified sender bank)";
@@ -60,21 +57,17 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
 }
 async function report(m:any,notice:ReturnType<typeof parseNotice>){
  const client=db();
- if(!notice.sender&&!notice.account)return reply(m,"🔎 <b>Customer not identified.</b>"+noticeDetails(notice)+"\nNo recognizable sender information was found.");
+ if(!notice.sender)return reply(m,"🔎 <b>Customer not identified.</b>"+noticeDetails(notice)+"\nNo recognizable sender name was found.");
  const {data:bankRows,error:bankError}=await client.from("bb_customer_bank_identities").select("identity_id,customer_id,bank_name,account_holder_name,account_number,alternative_names,active").eq("active",true).limit(2000);
  if(bankError)throw bankError;
- const nSender=norm(notice.sender),nBank=norm(notice.bank),nAccount=val(notice.account).replace(/[\s-]+/g,"");
- const candidates=new Set<string>(),strength=new Map<string,string>();
+ const nSender=norm(notice.sender);
+ const candidates=new Set<string>();
  for(const b of (bankRows||[]) as Bank[]){
-  if(nBank&&norm(b.bank_name)&&norm(b.bank_name)!==nBank)continue;
-  const savedAccount=val(b.account_number).replace(/[\s-]+/g,"");
-  const accountMatch=!!nAccount&&!!savedAccount&&nAccount===savedAccount&&!/[\*xX•]/.test(nAccount);
-  const nameMatch=!!nSender&&[b.account_holder_name,...(b.alternative_names||[])].some(name=>norm(name)===nSender);
-  if(!accountMatch&&!nameMatch)continue;
-  candidates.add(b.customer_id);
-  strength.set(b.customer_id,accountMatch?"Account number match":"Sender name match");
+  // Match the actual sender NAME across all banks and accounts.
+  // If multiple customers share this name, keep all candidates for review.
+  if([b.account_holder_name,...(b.alternative_names||[])].some(name=>norm(name)===nSender))candidates.add(b.customer_id);
  }
- if(!candidates.size)return reply(m,"🔎 <b>Transaction read successfully; customer not identified yet.</b>"+noticeDetails(notice)+"\n\nNo saved customer bank identity matches this payer. Please verify the sender and teach me using:\n<code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>\nMasked account digits alone are not sufficient to identify a customer.");
+ if(!candidates.size)return reply(m,"🔎 <b>Transaction read successfully; customer not identified yet.</b>"+noticeDetails(notice)+"\n\nNo saved customer name matches this payer. Verify the sender, then teach me using:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
  const ids=[...candidates].slice(0,8);
  const {data:people,error:peopleErr}=await client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(peopleErr)throw peopleErr;
@@ -108,16 +101,19 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
 function addCmd(t:string){
  const content=t.replace(/^\/bankadd(?:@\w+)?\s*/i,"");
  const parts=content.split("|").map(x=>x.trim());
- if(parts.length<3||parts.slice(0,3).some(x=>!x))return null;
- return {customer:parts[0],bank:parts[1],holder:parts[2],account:parts[3]||""};
+ if(parts.length===2&&parts.every(Boolean))return {customer:parts[0],holder:parts[1]};
+ // Previous command format is also accepted, but bank and account details
+ // are ignored so this feature never learns masked or bank-specific IDs.
+ if(parts.length>=3&&parts[0]&&parts[2])return {customer:parts[0],holder:parts[2]};
+ return null;
 }
 async function handle(m:any){
  const t=val(m.text||m.caption);
- if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nForward bank notifications to this group to identify customers and inspect possible A/R matches.\nTo teach me an identity, reply with:\n<code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>\nAdmin confirmation is required. No conversations are stored.");
+ if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nForward bank notifications to this group to identify customers and inspect possible A/R matches.\nTo teach me an identity, reply with:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nAdmin confirmation is required. No conversations are stored.");
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)){
   if(!await allowed(m.from?.id))return reply(m,"Only authorized Telegram administrators may add bank identities.");
   const data=addCmd(t);
-  if(!data)return reply(m,"Format: <code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>");
+  if(!data)return reply(m,"Format: <code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
   const {data:c}=await db().from("customers").select("customer_id,customer_name").eq("customer_id",data.customer).eq("active",true).maybeSingle();
   if(!c)return reply(m,"Customer ID not found. Check the ID in Customer Editor.");
   // No pending conversation stored: confirmation details live only in this bot message.
@@ -136,12 +132,12 @@ async function callback(cb:any){
  if(choice!=="bbbank:confirm")return;
  const t=val(m.text);
  const field=(name:string)=>{const rx=new RegExp("^"+name+":\\s*(.+)$","mi");return val(t.match(rx)?.[1]);};
- const customer=field("Customer ID"),bank=field("Bank"),holder=field("Account holder"),account=field("Account number");
- if(!customer||!bank||!holder||account.length>90||bank.length>90||holder.length>140){await tg("answerCallbackQuery",{callback_query_id:id,text:"Unable to validate confirmation.",show_alert:true});return;}
+ const customer=field("Customer ID"),holder=field("Account holder");
+ if(!customer||!holder||holder.length>140){await tg("answerCallbackQuery",{callback_query_id:id,text:"Unable to validate confirmation.",show_alert:true});return;}
  const client=db();
- const {data:existing}=await client.from("bb_customer_bank_identities").select("identity_id").eq("customer_id",customer).ilike("bank_name",bank).ilike("account_holder_name",holder).eq("active",true).limit(1);
+ const {data:existing}=await client.from("bb_customer_bank_identities").select("identity_id").eq("customer_id",customer).ilike("account_holder_name",holder).eq("active",true).limit(1);
  if(existing?.length){await tg("answerCallbackQuery",{callback_query_id:id,text:"This identity already exists."});return;}
- const {error}=await client.from("bb_customer_bank_identities").insert({customer_id:customer,bank_name:bank,account_holder_name:holder,account_number:account==="—"?null:account});
+ const {error}=await client.from("bb_customer_bank_identities").insert({customer_id:customer,bank_name:"ANY",account_holder_name:holder,account_number:null});
  if(error){await tg("answerCallbackQuery",{callback_query_id:id,text:"Could not save bank identity.",show_alert:true});return;}
  await tg("answerCallbackQuery",{callback_query_id:id,text:"Customer bank identity saved."});
  await tg("editMessageReplyMarkup",{chat_id:m.chat.id,message_id:m.message_id,reply_markup:{inline_keyboard:[]}});
