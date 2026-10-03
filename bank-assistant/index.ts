@@ -99,12 +99,24 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
  return reply(m,head);
 }
 function whoIsName(text:string){
- const match=val(text).match(/^(?:who\s+is|who['’]?s)\s+(.+?)\s*[?？.!។]*\s*$/i);
- return match?val(match[1]).replace(/\s*[?？.!។]+$/,"").trim():"";
+ const t=val(text).replace(/[?？!។.]+\s*$/u,"").trim();
+ // Deliberately scoped to sender identity questions; normal bank forwards
+ // and unrelated conversation continue through the existing handlers.
+ const patterns=[
+  /^(?:who\s+is|who['’]?s|which\s+customer\s+is|identify(?:\s+sender)?)\s+(.+)$/i,
+  /^(?:តើ\s*)?(.+?)\s*(?:ជា\s*នរណា|គឺ\s*ជា\s*នរណា|ជា\s*អ្នកណា|គឺ\s*អ្នកណា)$/u,
+  /^(?:តើ\s*)?(?:ឈ្មោះ|អ្នកផ្ទេរ|ម្ចាស់គណនី)\s*(.+?)\s*(?:ជា\s*អតិថិជន\s*(?:ណា|មួយណា)|របស់\s*អតិថិជន\s*(?:ណា|មួយណា))$/u,
+  /^(?:តើ\s*)?(.+?)\s*(?:ជា\s*អតិថិជន\s*(?:ណា|មួយណា)|របស់\s*អតិថិជន\s*(?:ណា|មួយណា))$/u,
+ ];
+ for(const pattern of patterns){
+  const match=t.match(pattern);
+  if(match?.[1])return val(match[1]).replace(/^ឈ្មោះ\s*/u,"").trim();
+ }
+ return "";
 }
 async function answerWhoIs(m:any,rawName:string){
  const queried=norm(rawName);
- if(queried.length<2||queried.length>150)return reply(m,"សូមសួរដោយប្រើឈ្មោះអ្នកផ្ទេរ ឧទាហរណ៍៖ <code>Who is KEO LAKHENA?</code>");
+ if(queried.length<2||queried.length>150)return reply(m,"សូមសួរដោយប្រើឈ្មោះអ្នកផ្ទេរ ឧទាហរណ៍៖ <code>Who is KEO LAKHENA?</code> ឬ <code>តើ KEO LAKHENA ជានរណា?</code>");
  const client=db();
  const {data:rows,error}=await client.from("bb_customer_bank_identities")
    .select("customer_id,account_holder_name,alternative_names").eq("active",true).limit(2000);
@@ -156,7 +168,7 @@ function addCmd(t:string){
 }
 async function handle(m:any){
  const t=val(m.text||m.caption);
- if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារមកទីនេះ ឬសួរ៖ Who is KEO LAKHENA?\nដើម្បីបន្ថែមឈ្មោះអ្នកផ្ទេរ សូមប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nត្រូវមានការបញ្ជាក់ពីអ្នកគ្រប់គ្រង។ មិនរក្សាទុកប្រវត្តិសន្ទនាទេ។");
+ if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារមកទីនេះ ឬសួរ៖\n• Who is KEO LAKHENA?\n• តើ KEO LAKHENA ជានរណា?\n• តើ KEO LAKHENA ជាអតិថិជនណា?\nដើម្បីបន្ថែមឈ្មោះអ្នកផ្ទេរ សូមប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nត្រូវមានការបញ្ជាក់ពីអ្នកគ្រប់គ្រង។ មិនរក្សាទុកប្រវត្តិសន្ទនាទេ។");
  const askedName=whoIsName(t);
  if(askedName){
    // Customer balances should only be returned to authorized Telegram administrators.
