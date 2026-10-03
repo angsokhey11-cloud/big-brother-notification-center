@@ -243,7 +243,7 @@ Deno.serve(async(req:Request)=>{
  if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==cfg.secret)return new Response("Unauthorized",{status:401});
  try{
   const u=await req.json(),m=u.message;
-  if(m){const scope=await bankScope(m);if(scope){if(await scopeAllows(m,scope))await handle(m,scope);else if(/^\\/(?:bankhelp|bankadd)(?:@\\w+)?\\b/i.test(val(m.text)))await reply(m,"⛔ អ្នកមិនទាន់មានសិទ្ធិប្រើ Assistant ក្នុងក្រុមនេះទេ។ សូមទាក់ទង Admin។");}}
+  if(m){const scope=await bankScope(m);if(scope){if(await scopeAllows(m,scope))await handle(m,scope);else if(val(m.text).startsWith("/bankhelp")||val(m.text).startsWith("/bankadd"))await reply(m,"⛔ អ្នកមិនទាន់មានសិទ្ធិប្រើ Assistant ក្នុងក្រុមនេះទេ។ សូមទាក់ទង Admin។");}}
   if(u.callback_query){const scope=await bankScope(u.callback_query.message);if(scope&&await scopeAllows({from:u.callback_query.from},scope))await callback(u.callback_query);}
   return Response.json({ok:true});
  }catch(e){console.error("Incoming Telegram handling failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
