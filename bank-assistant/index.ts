@@ -13,7 +13,9 @@ type Bank={identity_id:number,customer_id:string,bank_name:string,account_holder
 type Customer={customer_id:string,customer_name:string};
 type Invoice={invoice_id:string,invoice_no:string,currency:string,outstanding:number};
 const allowed=(id:unknown)=>val(Deno.env.get("TELEGRAM_BANK_ASSISTANT_ADMIN_IDS")).split(",").map(s=>s.trim()).filter(Boolean).includes(val(id));
-const target=()=>val(Deno.env.get("TELEGRAM_BANK_ASSISTANT_CHAT_ID"));
+const target=()=>val(Deno.env.get("TELEGRAM_BANK_ASSISTANT_CHAT_ID")) || "-1004376243495";
+const topic=()=>Number(Deno.env.get("TELEGRAM_BANK_ASSISTANT_TOPIC_ID") || "2");
+const inBankTopic=(m:any)=>val(m?.chat?.id)===target() && Number(m?.message_thread_id)===topic();
 const token=()=>val(Deno.env.get("TELEGRAM_BOT_TOKEN"));
 const db=()=>createClient(Deno.env.get("SUPABASE_URL")||"",Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",{auth:{persistSession:false}});
 async function tg(method:string,body:Record<string,unknown>){const r=await fetch("https://api.telegram.org/bot"+token()+"/"+method,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});if(!r.ok)throw Error("Telegram request failed: "+r.status);return r.json();}
@@ -141,8 +143,8 @@ Deno.serve(async(req:Request)=>{
  if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==secret)return new Response("Unauthorized",{status:401});
  try{
   const u=await req.json(),m=u.message||u.edited_message;
-  if(m&&val(m.chat?.id)===target())await handle(m);
-  if(u.callback_query&&val(u.callback_query.message?.chat?.id)===target())await callback(u.callback_query);
+  if(m&&inBankTopic(m))await handle(m);
+  if(u.callback_query&&inBankTopic(u.callback_query.message))await callback(u.callback_query);
   return Response.json({ok:true});
  }catch(e){console.error("Bank Assistant request failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
 });
