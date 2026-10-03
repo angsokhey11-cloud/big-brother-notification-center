@@ -71,7 +71,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
  const ids=[...candidates].slice(0,8);
  const {data:people,error:peopleErr}=await client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(peopleErr)throw peopleErr;
- let head=ids.length>1?"⚠️ <b>Shared bank identity: multiple possible customers.</b>":"✅ <b>Possible customer identified.</b>";
+ let head=ids.length>1?"⚠️ <b>Shared sender name: multiple possible customers.</b>":"✅ <b>Possible customer identified.</b>";
  head+=noticeDetails(notice);
  if(notice.transactionId){
   const [pay,reg,dep]=await Promise.all([
