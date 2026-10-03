@@ -82,7 +82,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
   if(pay.data?.length||reg.data?.length||dep.data?.length)head+="\n⚠️ <b>Transaction ID already recorded or registered. Review before proceeding.</b>";
  }
  for(const c of (people||[]) as Customer[]){
-  head+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")\n"+escape(strength.get(c.customer_id)||"Bank identity match");
+  head+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")\nSender name match";
   const {data:open,error:openError}=await client.from("invoices").select("invoice_id,invoice_no,currency,outstanding").eq("customer_id",c.customer_id).gt("outstanding",0).order("invoice_date",{ascending:true}).limit(35);
   if(openError){head+="\nReceivables currently unavailable.";continue;}
   const rows=(open||[]) as Invoice[];
@@ -117,7 +117,7 @@ async function handle(m:any){
   const {data:c}=await db().from("customers").select("customer_id,customer_name").eq("customer_id",data.customer).eq("active",true).maybeSingle();
   if(!c)return reply(m,"Customer ID not found. Check the ID in Customer Editor.");
   // No pending conversation stored: confirmation details live only in this bot message.
-  return reply(m,"🏦 <b>Confirm new bank identity</b>\nCustomer: "+escape(c.customer_name)+"\nCustomer ID: <code>"+escape(data.customer)+"</code>\nBank: <code>"+escape(data.bank)+"</code>\nAccount holder: <code>"+escape(data.holder)+"</code>\nAccount number: <code>"+escape(data.account||"—")+"</code>\nOnly confirm if you checked the sender identity.",{reply_markup:{inline_keyboard:[[{text:"✅ Confirm & save",callback_data:"bbbank:confirm"},{text:"Cancel",callback_data:"bbbank:cancel"}]]}});
+  return reply(m,"🏦 <b>Confirm new sender name</b>\nCustomer: "+escape(c.customer_name)+"\nCustomer ID: <code>"+escape(data.customer)+"</code>\nAccount holder: <code>"+escape(data.holder)+"</code>\nThis name will match across banks. Verify before saving.",{reply_markup:{inline_keyboard:[[{text:"✅ Confirm & save",callback_data:"bbbank:confirm"},{text:"Cancel",callback_data:"bbbank:cancel"}]]}});
  }
  // Only inspect forwarded messages or direct slips/text notifications posted inside our dedicated group.
  if(m.photo?.length&&!t)return reply(m,"I received a picture, but this version requires sender details in the message or caption. Please forward the bank notification text or add the visible sender name as a caption. I will not guess from an unreadable slip.");
