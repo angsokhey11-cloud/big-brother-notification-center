@@ -98,6 +98,53 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
  head+="\n\n<i>Identification and suggestions only. No payment or invoice was changed.</i>";
  return reply(m,head);
 }
+function whoIsName(text:string){
+ const match=val(text).match(/^(?:who\s+is|who['’]?s)\s+(.+?)\s*[?？.!។]*\s*$/i);
+ return match?val(match[1]).replace(/\s*[?？.!។]+$/,"").trim():"";
+}
+async function answerWhoIs(m:any,rawName:string){
+ const queried=norm(rawName);
+ if(queried.length<2||queried.length>150)return reply(m,"Please ask using a sender name, for example: <code>Who is KEO LAKHENA?</code>");
+ const client=db();
+ const {data:rows,error}=await client.from("bb_customer_bank_identities")
+   .select("customer_id,account_holder_name,alternative_names").eq("active",true).limit(2000);
+ if(error)throw error;
+ // Identity is attached to a customer, not an individual's verified identity.
+ const ids=new Set<string>();
+ for(const entry of rows||[]){
+  const names=[entry.account_holder_name,...(entry.alternative_names||[])];
+  if(names.some((name:string)=>norm(name)===queried))ids.add(entry.customer_id);
+ }
+ if(!ids.size)return reply(m,"🔎 <b>Sender name not found.</b>\nName: "+escape(rawName)+"\nI don't have a confirmed customer mapping for this name.\nIf you know the customer, an authorized admin can use:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
+ const customerIds=[...ids].slice(0,12);
+ const {data:customers,error:peopleError}=await client.from("customers")
+   .select("customer_id,customer_name").in("customer_id",customerIds);
+ if(peopleError)throw peopleError;
+ let msg=ids.size>1?"⚠️ <b>This sender name is linked to multiple customers.</b>":"🔎 <b>Saved sender-name lookup</b>";
+ msg+="\nSender name: <b>"+escape(rawName)+"</b>";
+ if(ids.size>12)msg+="\nShowing the first 12 matches; review the Customer Bank Directory for the full list.";
+ for(const c of customers||[]){
+  msg+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")";
+  const {data:open,error:openError}=await client.from("invoices")
+    .select("invoice_no,currency,outstanding").eq("customer_id",c.customer_id)
+    .gt("outstanding",0).order("invoice_date",{ascending:true}).limit(100);
+  if(openError){msg+="\nReceivables temporarily unavailable.";continue;}
+  if(!open?.length){msg+="\nNo outstanding receivable invoices.";continue;}
+  const totals=new Map<string,number>();
+  for(const invoice of open){
+    const currency=val(invoice.currency).toUpperCase()||"USD";
+    totals.set(currency,(totals.get(currency)||0)+Number(invoice.outstanding||0));
+  }
+  msg+="\nOutstanding invoices: "+open.length+(open.length===100?" (up to 100 shown)":"");
+  for(const [currency,total] of totals)msg+="\nTotal "+escape(currency)+": "+total.toLocaleString("en-US",{maximumFractionDigits:2});
+  for(const invoice of open.slice(0,5)){
+   msg+="\n• "+escape(invoice.invoice_no)+" — "+escape(invoice.currency)+" "+Number(invoice.outstanding).toLocaleString("en-US",{maximumFractionDigits:2});
+  }
+  if(open.length>5)msg+="\n...and "+(open.length-5)+" other outstanding invoices.";
+ }
+ msg+="\n\n<i>Based on saved customer mappings and current receivables; not independent verification of the payer.</i>";
+ return reply(m,msg);
+}
 function addCmd(t:string){
  const content=t.replace(/^\/bankadd(?:@\w+)?\s*/i,"");
  const parts=content.split("|").map(x=>x.trim());
@@ -109,7 +156,13 @@ function addCmd(t:string){
 }
 async function handle(m:any){
  const t=val(m.text||m.caption);
- if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nForward bank notifications to this group to identify customers and inspect possible A/R matches.\nTo teach me an identity, reply with:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nAdmin confirmation is required. No conversations are stored.");
+ if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nForward bank notifications here, or ask: Who is KEO LAKHENA?\nTo teach me an identity, reply with:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nAdmin confirmation is required. No conversations are stored.");
+ const askedName=whoIsName(t);
+ if(askedName){
+   // Customer balances should only be returned to authorized Telegram administrators.
+   if(!await allowed(m.from?.id))return reply(m,"Only authorized administrators can request customer receivable information.");
+   return answerWhoIs(m,askedName);
+ }
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)){
   if(!await allowed(m.from?.id))return reply(m,"Only authorized Telegram administrators may add bank identities.");
   const data=addCmd(t);
