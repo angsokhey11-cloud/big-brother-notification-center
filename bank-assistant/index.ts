@@ -181,11 +181,11 @@ async function handle(m:any){
 async function callback(cb:any){
  const m=cb.message,choice=val(cb.data),id=cb.id;
  if(!m||!await allowed(cb.from?.id)){await tg("answerCallbackQuery",{callback_query_id:id,text:"មានតែអ្នកគ្រប់គ្រងដែលបានអនុញ្ញាតប៉ុណ្ណោះដែលអាចរក្សាទុកឈ្មោះអ្នកផ្ទេរ។",show_alert:true});return;}
- if(choice==="bbbank:cancel"){await tg("answerCallbackQuery",{callback_query_id:id,text:"បោះបង់led."});return;}
+ if(choice==="bbbank:cancel"){await tg("answerCallbackQuery",{callback_query_id:id,text:"បានបោះបង់។"});return;}
  if(choice!=="bbbank:confirm")return;
  const t=val(m.text);
  const field=(name:string)=>{const rx=new RegExp("^"+name+":\\s*(.+)$","mi");return val(t.match(rx)?.[1]);};
- const customer=field("Customer ID"),holder=field("Account holder");
+ const customer=field("លេខសម្គាល់អតិថិជន"),holder=field("ឈ្មោះម្ចាស់គណនី");
  if(!customer||!holder||holder.length>140){await tg("answerCallbackQuery",{callback_query_id:id,text:"មិនអាចផ្ទៀងផ្ទាត់ការបញ្ជាក់បានទេ។",show_alert:true});return;}
  const client=db();
  const {data:existing}=await client.from("bb_customer_bank_identities").select("identity_id").eq("customer_id",customer).ilike("account_holder_name",holder).eq("active",true).limit(1);
