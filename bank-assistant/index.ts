@@ -49,15 +49,15 @@ function combos(rows:Invoice[],sum:number,currency:string){
  walk(0,0,[]);return found;
 }
 function noticeDetails(n:ReturnType<typeof parseNotice>){
- let result="\nPayer: <b>"+escape(n.sender||"Not shown")+"</b>";
- if(n.currency&&n.amount!==null)result+="\nAmount: "+escape(n.currency)+" "+escape(n.amount.toLocaleString("en-US",{maximumFractionDigits:2}));
- if(n.transactionId)result+="\nTransaction ID: "+escape(n.transactionId);
- if(n.channel)result+="\nPayment channel: "+escape(n.channel)+" (not verified sender bank)";
+ let result="\nឈ្មោះអ្នកផ្ទេរ៖ <b>"+escape(n.sender||"មិនមានឈ្មោះ")+"</b>";
+ if(n.currency&&n.amount!==null)result+="\nចំនួនទឹកប្រាក់៖ "+escape(n.currency)+" "+escape(n.amount.toLocaleString("en-US",{maximumFractionDigits:2}));
+ if(n.transactionId)result+="\nលេខប្រតិបត្តិការ៖ "+escape(n.transactionId);
+ if(n.channel)result+="\nប្រភេទផ្ទេរ៖ "+escape(n.channel)+" (មិនមែនជាធនាគាររបស់អ្នកផ្ញើដែលបានផ្ទៀងផ្ទាត់)";
  return result;
 }
 async function report(m:any,notice:ReturnType<typeof parseNotice>){
  const client=db();
- if(!notice.sender)return reply(m,"🔎 <b>Customer not identified.</b>"+noticeDetails(notice)+"\nNo recognizable sender name was found.");
+ if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
  const {data:bankRows,error:bankError}=await client.from("bb_customer_bank_identities").select("identity_id,customer_id,bank_name,account_holder_name,account_number,alternative_names,active").eq("active",true).limit(2000);
  if(bankError)throw bankError;
  const nSender=norm(notice.sender);
@@ -67,11 +67,11 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
   // If multiple customers share this name, keep all candidates for review.
   if([b.account_holder_name,...(b.alternative_names||[])].some(name=>norm(name)===nSender))candidates.add(b.customer_id);
  }
- if(!candidates.size)return reply(m,"🔎 <b>Transaction read successfully; customer not identified yet.</b>"+noticeDetails(notice)+"\n\nNo saved customer name matches this payer. Verify the sender, then teach me using:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
+ if(!candidates.size)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
  const ids=[...candidates].slice(0,8);
  const {data:people,error:peopleErr}=await client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(peopleErr)throw peopleErr;
- let head=ids.length>1?"⚠️ <b>Shared sender name: multiple possible customers.</b>":"✅ <b>Possible customer identified.</b>";
+ let head=ids.length>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះត្រូវនឹងអតិថិជនច្រើននាក់</b>":"✅ <b>រកឃើញអតិថិជនដែលអាចត្រូវនឹងឈ្មោះនេះ</b>";
  head+=noticeDetails(notice);
  if(notice.transactionId){
   const [pay,reg,dep]=await Promise.all([
@@ -79,23 +79,23 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
     client.from("bb_verified_bank_transactions").select("status").ilike("transaction_id",notice.transactionId).limit(1),
     client.from("company_deposits").select("deposit_id").ilike("collection_transaction_id",notice.transactionId).limit(1)
   ]);
-  if(pay.data?.length||reg.data?.length||dep.data?.length)head+="\n⚠️ <b>Transaction ID already recorded or registered. Review before proceeding.</b>";
+  if(pay.data?.length||reg.data?.length||dep.data?.length)head+="\n⚠️ <b>លេខប្រតិបត្តិការនេះមានក្នុងប្រវត្តិទូទាត់ ឬបញ្ជីធនាគាររួចហើយ។ សូមពិនិត្យមុនបន្ត។</b>";
  }
  for(const c of (people||[]) as Customer[]){
-  head+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")\nSender name match";
+  head+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")\nផ្គូផ្គងតាមឈ្មោះអ្នកផ្ទេរ";
   const {data:open,error:openError}=await client.from("invoices").select("invoice_id,invoice_no,currency,outstanding").eq("customer_id",c.customer_id).gt("outstanding",0).order("invoice_date",{ascending:true}).limit(35);
-  if(openError){head+="\nReceivables currently unavailable.";continue;}
+  if(openError){head+="\nមិនអាចទាញយកទិន្នន័យបំណុលបាននៅពេលនេះ។";continue;}
   const rows=(open||[]) as Invoice[];
-  if(!rows.length){head+="\nNo outstanding receivables; possibly a new invoice or another payment.";continue;}
-  head+="\nOutstanding invoices: "+rows.length;
+  if(!rows.length){head+="\nមិនមានវិក្កយបត្រជំពាក់។ អាចជាការទូទាត់វិក្កយបត្រថ្មី ឬប្រតិបត្តិការផ្សេង។";continue;}
+  head+="\nវិក្កយបត្រមិនទាន់ទូទាត់៖ "+rows.length;
   if(notice.currency&&notice.amount!==null&&notice.amount>0){
    const matches=combos(rows,notice.amount,notice.currency);
-   if(matches.length){head+="\n<b>Possible exact receivable combinations:</b>";
+   if(matches.length){head+="\n<b>វិក្កយបត្រជំពាក់ដែលអាចត្រូវនឹងចំនួនទឹកប្រាក់៖</b>";
     for(const group of matches){head+="\n• "+group.map(x=>escape(x.invoice_no)+" ("+escape(x.currency)+" "+escape(x.outstanding)+")").join(" + ");}
-   }else head+="\nNo exact same-currency receivable combination found; could be partial A/R, cross-currency payment, new invoice or another transaction.";
-  }else head+="\nTransfer amount/currency not confirmed, so no amount matching performed.";
+   }else head+="\nរកមិនឃើញវិក្កយបត្រជំពាក់ដែលមានរូបិយប័ណ្ណ និងចំនួនទឹកប្រាក់ត្រូវគ្នាទាំងស្រុងទេ។ អាចជាការបង់មួយផ្នែក ការបង់ឆ្លងរូបិយប័ណ្ណ វិក្កយបត្រថ្មី ឬប្រតិបត្តិការផ្សេង។";
+  }else head+="\nមិនទាន់មានចំនួនទឹកប្រាក់ ឬរូបិយប័ណ្ណច្បាស់លាស់ ដូច្នេះមិនទាន់ផ្គូផ្គងវិក្កយបត្រទេ។";
  }
- head+="\n\n<i>Identification and suggestions only. No payment or invoice was changed.</i>";
+ head+="\n\n<i>នេះគ្រាន់តែជាការសម្គាល់ និងការណែនាំប៉ុណ្ណោះ។ គ្មានការកែប្រែការទូទាត់ ឬវិក្កយបត្រឡើយ។</i>";
  return reply(m,head);
 }
 function whoIsName(text:string){
@@ -104,7 +104,7 @@ function whoIsName(text:string){
 }
 async function answerWhoIs(m:any,rawName:string){
  const queried=norm(rawName);
- if(queried.length<2||queried.length>150)return reply(m,"Please ask using a sender name, for example: <code>Who is KEO LAKHENA?</code>");
+ if(queried.length<2||queried.length>150)return reply(m,"សូមសួរដោយប្រើឈ្មោះអ្នកផ្ទេរ ឧទាហរណ៍៖ <code>Who is KEO LAKHENA?</code>");
  const client=db();
  const {data:rows,error}=await client.from("bb_customer_bank_identities")
    .select("customer_id,account_holder_name,alternative_names").eq("active",true).limit(2000);
@@ -115,34 +115,34 @@ async function answerWhoIs(m:any,rawName:string){
   const names=[entry.account_holder_name,...(entry.alternative_names||[])];
   if(names.some((name:string)=>norm(name)===queried))ids.add(entry.customer_id);
  }
- if(!ids.size)return reply(m,"🔎 <b>Sender name not found.</b>\nName: "+escape(rawName)+"\nI don't have a confirmed customer mapping for this name.\nIf you know the customer, an authorized admin can use:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
+ if(!ids.size)return reply(m,"🔎 <b>មិនមានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជី</b>\nឈ្មោះ៖ "+escape(rawName)+"\nខ្ញុំមិនទាន់មានព័ត៌មានបញ្ជាក់ថាឈ្មោះនេះភ្ជាប់នឹងអតិថិជនណាទេ។\nបើលោកអ្នកស្គាល់អតិថិជន អ្នកគ្រប់គ្រងដែលមានសិទ្ធិអាចបន្ថែមតាម៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
  const customerIds=[...ids].slice(0,12);
  const {data:customers,error:peopleError}=await client.from("customers")
    .select("customer_id,customer_name").in("customer_id",customerIds);
  if(peopleError)throw peopleError;
- let msg=ids.size>1?"⚠️ <b>This sender name is linked to multiple customers.</b>":"🔎 <b>Saved sender-name lookup</b>";
- msg+="\nSender name: <b>"+escape(rawName)+"</b>";
- if(ids.size>12)msg+="\nShowing the first 12 matches; review the Customer Bank Directory for the full list.";
+ let msg=ids.size>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះភ្ជាប់នឹងអតិថិជនច្រើននាក់</b>":"🔎 <b>លទ្ធផលស្វែងរកឈ្មោះអ្នកផ្ទេរ</b>";
+ msg+="\nឈ្មោះអ្នកផ្ទេរ៖ <b>"+escape(rawName)+"</b>";
+ if(ids.size>12)msg+="\nបង្ហាញត្រឹម ១២ លទ្ធផលដំបូង។ សូមពិនិត្យបញ្ជីឈ្មោះអ្នកផ្ទេរសម្រាប់ព័ត៌មានទាំងអស់។";
  for(const c of customers||[]){
   msg+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")";
   const {data:open,error:openError}=await client.from("invoices")
     .select("invoice_no,currency,outstanding").eq("customer_id",c.customer_id)
     .gt("outstanding",0).order("invoice_date",{ascending:true}).limit(100);
-  if(openError){msg+="\nReceivables temporarily unavailable.";continue;}
-  if(!open?.length){msg+="\nNo outstanding receivable invoices.";continue;}
+  if(openError){msg+="\nមិនអាចទាញយកព័ត៌មានបំណុលបាននៅពេលនេះ។";continue;}
+  if(!open?.length){msg+="\nមិនមានវិក្កយបត្រជំពាក់។";continue;}
   const totals=new Map<string,number>();
   for(const invoice of open){
     const currency=val(invoice.currency).toUpperCase()||"USD";
     totals.set(currency,(totals.get(currency)||0)+Number(invoice.outstanding||0));
   }
-  msg+="\nOutstanding invoices: "+open.length+(open.length===100?" (up to 100 shown)":"");
-  for(const [currency,total] of totals)msg+="\nTotal "+escape(currency)+": "+total.toLocaleString("en-US",{maximumFractionDigits:2});
+  msg+="\nវិក្កយបត្រមិនទាន់ទូទាត់៖ "+open.length+(open.length===100?" (បង្ហាញអតិបរមា ១០០)":"");
+  for(const [currency,total] of totals)msg+="\nសរុប "+escape(currency)+": "+total.toLocaleString("en-US",{maximumFractionDigits:2});
   for(const invoice of open.slice(0,5)){
    msg+="\n• "+escape(invoice.invoice_no)+" — "+escape(invoice.currency)+" "+Number(invoice.outstanding).toLocaleString("en-US",{maximumFractionDigits:2});
   }
-  if(open.length>5)msg+="\n...and "+(open.length-5)+" other outstanding invoices.";
+  if(open.length>5)msg+="\n...និងវិក្កយបត្រជំពាក់ "+(open.length-5)+" ផ្សេងទៀត។";
  }
- msg+="\n\n<i>Based on saved customer mappings and current receivables; not independent verification of the payer.</i>";
+ msg+="\n\n<i>ផ្អែកតាមឈ្មោះដែលបានរក្សាទុក និងទិន្នន័យបំណុលបច្ចុប្បន្នប៉ុណ្ណោះ។ មិនមែនជាការផ្ទៀងផ្ទាត់អត្តសញ្ញាណអ្នកផ្ទេរដោយឯករាជ្យទេ។</i>";
  return reply(m,msg);
 }
 function addCmd(t:string){
@@ -156,45 +156,45 @@ function addCmd(t:string){
 }
 async function handle(m:any){
  const t=val(m.text||m.caption);
- if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nForward bank notifications here, or ask: Who is KEO LAKHENA?\nTo teach me an identity, reply with:\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nAdmin confirmation is required. No conversations are stored.");
+ if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារមកទីនេះ ឬសួរ៖ Who is KEO LAKHENA?\nដើម្បីបន្ថែមឈ្មោះអ្នកផ្ទេរ សូមប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nត្រូវមានការបញ្ជាក់ពីអ្នកគ្រប់គ្រង។ មិនរក្សាទុកប្រវត្តិសន្ទនាទេ។");
  const askedName=whoIsName(t);
  if(askedName){
    // Customer balances should only be returned to authorized Telegram administrators.
-   if(!await allowed(m.from?.id))return reply(m,"Only authorized administrators can request customer receivable information.");
+   if(!await allowed(m.from?.id))return reply(m,"មានតែអ្នកគ្រប់គ្រងដែលបានផ្តល់សិទ្ធិប៉ុណ្ណោះដែលអាចសួរព័ត៌មានបំណុលអតិថិជនបាន។");
    return answerWhoIs(m,askedName);
  }
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)){
-  if(!await allowed(m.from?.id))return reply(m,"Only authorized Telegram administrators may add bank identities.");
+  if(!await allowed(m.from?.id))return reply(m,"មានតែអ្នកគ្រប់គ្រងដែលបានផ្តល់សិទ្ធិប៉ុណ្ណោះដែលអាចបន្ថែមឈ្មោះអ្នកផ្ទេរបាន។");
   const data=addCmd(t);
-  if(!data)return reply(m,"Format: <code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
+  if(!data)return reply(m,"ទម្រង់៖ <code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
   const {data:c}=await db().from("customers").select("customer_id,customer_name").eq("customer_id",data.customer).eq("active",true).maybeSingle();
-  if(!c)return reply(m,"Customer ID not found. Check the ID in Customer Editor.");
+  if(!c)return reply(m,"រកមិនឃើញលេខសម្គាល់អតិថិជន។ សូមពិនិត្យក្នុង Customer Editor។");
   // No pending conversation stored: confirmation details live only in this bot message.
-  return reply(m,"🏦 <b>Confirm new sender name</b>\nCustomer: "+escape(c.customer_name)+"\nCustomer ID: <code>"+escape(data.customer)+"</code>\nAccount holder: <code>"+escape(data.holder)+"</code>\nThis name will match across banks. Verify before saving.",{reply_markup:{inline_keyboard:[[{text:"✅ Confirm & save",callback_data:"bbbank:confirm"},{text:"Cancel",callback_data:"bbbank:cancel"}]]}});
+  return reply(m,"🏦 <b>បញ្ជាក់ការបន្ថែមឈ្មោះអ្នកផ្ទេរ</b>\nអតិថិជន៖ "+escape(c.customer_name)+"\nលេខសម្គាល់អតិថិជន៖ <code>"+escape(data.customer)+"</code>\nឈ្មោះម្ចាស់គណនី៖ <code>"+escape(data.holder)+"</code>\nឈ្មោះនេះនឹងត្រូវផ្គូផ្គងដោយមិនប្រកាន់ធនាគារ។ សូមផ្ទៀងផ្ទាត់មុនរក្សាទុក។",{reply_markup:{inline_keyboard:[[{text:"✅ បញ្ជាក់ និងរក្សាទុក",callback_data:"bbbank:confirm"},{text:"បោះបង់",callback_data:"bbbank:cancel"}]]}});
  }
  // Only inspect forwarded messages or direct slips/text notifications posted inside our dedicated group.
- if(m.photo?.length&&!t)return reply(m,"I received a picture, but this version requires sender details in the message or caption. Please forward the bank notification text or add the visible sender name as a caption. I will not guess from an unreadable slip.");
+ if(m.photo?.length&&!t)return reply(m,"ខ្ញុំបានទទួលរូបភាពហើយ ប៉ុន្តែកំណែនេះត្រូវការឈ្មោះអ្នកផ្ទេរជាអក្សរ។ សូមបញ្ជូនសារជូនដំណឹងពីធនាគារ ឬបន្ថែមឈ្មោះអ្នកផ្ទេរក្នុង Caption។ ខ្ញុំមិនអាចសន្មតពីរូបភាពមិនច្បាស់បានទេ។");
  if(!t)return;
  if(!m.forward_origin&&!m.forward_date&&!/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛)/i.test(t))return;
  return report(m,parseNotice(t));
 }
 async function callback(cb:any){
  const m=cb.message,choice=val(cb.data),id=cb.id;
- if(!m||!await allowed(cb.from?.id)){await tg("answerCallbackQuery",{callback_query_id:id,text:"Only approved administrators can save bank identities.",show_alert:true});return;}
- if(choice==="bbbank:cancel"){await tg("answerCallbackQuery",{callback_query_id:id,text:"Cancelled."});return;}
+ if(!m||!await allowed(cb.from?.id)){await tg("answerCallbackQuery",{callback_query_id:id,text:"មានតែអ្នកគ្រប់គ្រងដែលបានអនុញ្ញាតប៉ុណ្ណោះដែលអាចរក្សាទុកឈ្មោះអ្នកផ្ទេរ។",show_alert:true});return;}
+ if(choice==="bbbank:cancel"){await tg("answerCallbackQuery",{callback_query_id:id,text:"បោះបង់led."});return;}
  if(choice!=="bbbank:confirm")return;
  const t=val(m.text);
  const field=(name:string)=>{const rx=new RegExp("^"+name+":\\s*(.+)$","mi");return val(t.match(rx)?.[1]);};
  const customer=field("Customer ID"),holder=field("Account holder");
- if(!customer||!holder||holder.length>140){await tg("answerCallbackQuery",{callback_query_id:id,text:"Unable to validate confirmation.",show_alert:true});return;}
+ if(!customer||!holder||holder.length>140){await tg("answerCallbackQuery",{callback_query_id:id,text:"មិនអាចផ្ទៀងផ្ទាត់ការបញ្ជាក់បានទេ។",show_alert:true});return;}
  const client=db();
  const {data:existing}=await client.from("bb_customer_bank_identities").select("identity_id").eq("customer_id",customer).ilike("account_holder_name",holder).eq("active",true).limit(1);
- if(existing?.length){await tg("answerCallbackQuery",{callback_query_id:id,text:"This identity already exists."});return;}
+ if(existing?.length){await tg("answerCallbackQuery",{callback_query_id:id,text:"ឈ្មោះអ្នកផ្ទេរនេះមានរួចហើយ។"});return;}
  const {error}=await client.from("bb_customer_bank_identities").insert({customer_id:customer,bank_name:"ANY",account_holder_name:holder,account_number:null});
- if(error){await tg("answerCallbackQuery",{callback_query_id:id,text:"Could not save bank identity.",show_alert:true});return;}
- await tg("answerCallbackQuery",{callback_query_id:id,text:"Customer bank identity saved."});
+ if(error){await tg("answerCallbackQuery",{callback_query_id:id,text:"មិនអាចរក្សាទុកឈ្មោះអ្នកផ្ទេរបានទេ។",show_alert:true});return;}
+ await tg("answerCallbackQuery",{callback_query_id:id,text:"បានរក្សាទុកឈ្មោះអ្នកផ្ទេរហើយ។"});
  await tg("editMessageReplyMarkup",{chat_id:m.chat.id,message_id:m.message_id,reply_markup:{inline_keyboard:[]}});
- await reply(m,"✅ Bank identity saved. Future notifications can match this customer.");
+ await reply(m,"✅ បានរក្សាទុកឈ្មោះអ្នកផ្ទេរហើយ។ សារជូនដំណឹងបន្ទាប់អាចផ្គូផ្គងនឹងអតិថិជននេះបាន។");
 }
 Deno.serve(async(req:Request)=>{
  if(req.method!=="POST")return new Response("Method not allowed",{status:405});
