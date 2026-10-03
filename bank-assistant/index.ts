@@ -41,7 +41,9 @@ const token=()=>val(Deno.env.get("TELEGRAM_BOT_TOKEN"));
 const db=()=>createClient(Deno.env.get("SUPABASE_URL")||"",Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",{auth:{persistSession:false}});
 async function tg(method:string,body:Record<string,unknown>){const r=await fetch("https://api.telegram.org/bot"+token()+"/"+method,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});if(!r.ok)throw Error("Telegram request failed: "+r.status);return r.json();}
 async function reply(m:any,html:string,extra:Record<string,unknown>={}){
- return tg("sendMessage",{chat_id:m.chat.id,message_thread_id:m.message_thread_id,reply_to_message_id:m.message_id,text:html.slice(0,3900),parse_mode:"HTML",disable_web_page_preview:true,...extra});
+ const destination:Record<string,unknown>={chat_id:m.chat.id,reply_to_message_id:m.message_id,text:html.slice(0,3900),parse_mode:"HTML",disable_web_page_preview:true,...extra};
+ if(Number(m.message_thread_id)>0)destination.message_thread_id=m.message_thread_id;
+ return tg("sendMessage",destination);
 }
 function parseNotice(raw:string){
  const t=raw.slice(0,4500);
