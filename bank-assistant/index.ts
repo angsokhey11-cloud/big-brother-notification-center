@@ -11,11 +11,31 @@ type Bank={identity_id:number,customer_id:string,bank_name:string,account_holder
 type Customer={customer_id:string,customer_name:string};
 type Invoice={invoice_id:string,invoice_no:string,currency:string,outstanding:number};
 const allowed=async(id:unknown)=>{if(!val(id))return false;const {data,error}=await db().from("bb_telegram_assistant_admins").select("telegram_user_id").eq("telegram_user_id",val(id)).maybeSingle();return !error&&!!data;};
-async function inBankTopic(m:any){
- if(!m?.chat?.id||!Number.isSafeInteger(Number(m.message_thread_id)))return false;
- const {data,error}=await db().from("bb_telegram_assistant_routes").select("telegram_chat_id,telegram_thread_id,active").eq("assistant_key","bank_assistant").eq("active",true).maybeSingle();
- if(error||!data)return false;
- return val(m.chat.id)===val(data.telegram_chat_id)&&Number(m.message_thread_id)===Number(data.telegram_thread_id);
+type RouteScope={location_code:string|null,access_mode:"legacy"|"staff_location"|"admin_only"};
+async function bankScope(m:any):Promise<RouteScope|null>{
+ if(!m?.chat?.id)return null;
+ const chat=val(m.chat.id),thread=Number(m.message_thread_id||0);
+ const client=db();
+ const {data:legacy,error:legacyError}=await client.from("bb_telegram_assistant_routes").select("telegram_chat_id,telegram_thread_id").eq("assistant_key","bank_assistant").eq("active",true).maybeSingle();
+ if(legacyError)throw legacyError;
+ if(legacy&&chat===val(legacy.telegram_chat_id)&&thread===Number(legacy.telegram_thread_id))return {location_code:null,access_mode:"legacy"};
+ const {data:routes,error}=await client.from("bb_telegram_assistant_group_routes").select("location_code,access_mode")
+ .eq("assistant_key","bank_assistant").eq("telegram_chat_id",chat).eq("telegram_thread_id",thread).eq("active",true).limit(1);
+ if(error)throw error;
+ if(!routes?.length)return null;
+ return {location_code:routes[0].location_code,access_mode:routes[0].access_mode};
+}
+async function scopeAllows(m:any,scope:RouteScope){
+ if(scope.access_mode==="legacy")return true;
+ if(await allowed(m.from?.id))return true;
+ if(scope.access_mode!=="staff_location"||!scope.location_code||!m.from?.id)return false;
+ // Only explicitly verified personal Telegram/staff links are considered.
+ const client=db();
+ const {data:links,error}=await client.from("telegram_staff_links").select("staff_id").eq("telegram_chat_id",val(m.from.id)).eq("active",true).not("verified_at","is",null).limit(20);
+ if(error||!links?.length)return false;
+ const staffIds=links.map((x:any)=>x.staff_id);
+ const {data:locations,error:locError}=await client.from("locations").select("location_code").eq("location_code",scope.location_code).in("salesperson_staff_id",staffIds).eq("active",true).limit(1);
+ return !locError&&!!locations?.length;
 }
 const token=()=>val(Deno.env.get("TELEGRAM_BOT_TOKEN"));
 const db=()=>createClient(Deno.env.get("SUPABASE_URL")||"",Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",{auth:{persistSession:false}});
@@ -55,7 +75,7 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
  if(n.channel)result+="\nប្រភេទផ្ទេរ៖ "+escape(n.channel)+" (មិនមែនជាធនាគាររបស់អ្នកផ្ញើដែលបានផ្ទៀងផ្ទាត់)";
  return result;
 }
-async function report(m:any,notice:ReturnType<typeof parseNotice>){
+async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
  const {data:bankRows,error:bankError}=await client.from("bb_customer_bank_identities").select("identity_id,customer_id,bank_name,account_holder_name,account_number,alternative_names,active").eq("active",true).limit(2000);
@@ -69,9 +89,12 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
  }
  if(!candidates.size)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
  const ids=[...candidates].slice(0,8);
- const {data:people,error:peopleErr}=await client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
+ let peopleQuery=client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
+ if(scope.location_code)peopleQuery=peopleQuery.eq("location_code",scope.location_code);
+ const {data:people,error:peopleErr}=await peopleQuery;
  if(peopleErr)throw peopleErr;
- let head=ids.length>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះត្រូវនឹងអតិថិជនច្រើននាក់</b>":"✅ <b>រកឃើញអតិថិជនដែលអាចត្រូវនឹងឈ្មោះនេះ</b>";
+ if(!people?.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។");
+ let head=people.length>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះត្រូវនឹងអតិថិជនច្រើននាក់</b>":"✅ <b>រកឃើញអតិថិជនដែលអាចត្រូវនឹងឈ្មោះនេះ</b>";
  head+=noticeDetails(notice);
  if(notice.transactionId){
   const [pay,reg,dep]=await Promise.all([
@@ -114,7 +137,7 @@ function whoIsName(text:string){
  }
  return "";
 }
-async function answerWhoIs(m:any,rawName:string){
+async function answerWhoIs(m:any,rawName:string,scope:RouteScope){
  const queried=norm(rawName);
  if(queried.length<2||queried.length>150)return reply(m,"សូមសួរដោយប្រើឈ្មោះអ្នកផ្ទេរ ឧទាហរណ៍៖ <code>Who is KEO LAKHENA?</code> ឬ <code>តើ KEO LAKHENA ជានរណា?</code>");
  const client=db();
@@ -129,10 +152,12 @@ async function answerWhoIs(m:any,rawName:string){
  }
  if(!ids.size)return reply(m,"🔎 <b>មិនមានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជី</b>\nឈ្មោះ៖ "+escape(rawName)+"\nខ្ញុំមិនទាន់មានព័ត៌មានបញ្ជាក់ថាឈ្មោះនេះភ្ជាប់នឹងអតិថិជនណាទេ។\nបើលោកអ្នកស្គាល់អតិថិជន អ្នកគ្រប់គ្រងដែលមានសិទ្ធិអាចបន្ថែមតាម៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
  const customerIds=[...ids].slice(0,12);
- const {data:customers,error:peopleError}=await client.from("customers")
-   .select("customer_id,customer_name").in("customer_id",customerIds);
+ let customersQuery=client.from("customers").select("customer_id,customer_name").in("customer_id",customerIds);
+ if(scope.location_code)customersQuery=customersQuery.eq("location_code",scope.location_code);
+ const {data:customers,error:peopleError}=await customersQuery;
  if(peopleError)throw peopleError;
- let msg=ids.size>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះភ្ជាប់នឹងអតិថិជនច្រើននាក់</b>":"🔎 <b>លទ្ធផលស្វែងរកឈ្មោះអ្នកផ្ទេរ</b>";
+ if(!customers?.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។");
+ let msg=customers.length>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះភ្ជាប់នឹងអតិថិជនច្រើននាក់</b>":"🔎 <b>លទ្ធផលស្វែងរកឈ្មោះអ្នកផ្ទេរ</b>";
  msg+="\nឈ្មោះអ្នកផ្ទេរ៖ <b>"+escape(rawName)+"</b>";
  if(ids.size>12)msg+="\nបង្ហាញត្រឹម ១២ លទ្ធផលដំបូង។ សូមពិនិត្យបញ្ជីឈ្មោះអ្នកផ្ទេរសម្រាប់ព័ត៌មានទាំងអស់។";
  for(const c of customers||[]){
@@ -166,14 +191,14 @@ function addCmd(t:string){
  if(parts.length>=3&&parts[0]&&parts[2])return {customer:parts[0],holder:parts[2]};
  return null;
 }
-async function handle(m:any){
+async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
  if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារមកទីនេះ ឬសួរ៖\n• Who is KEO LAKHENA?\n• តើ KEO LAKHENA ជានរណា?\n• តើ KEO LAKHENA ជាអតិថិជនណា?\nដើម្បីបន្ថែមឈ្មោះអ្នកផ្ទេរ សូមប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nត្រូវមានការបញ្ជាក់ពីអ្នកគ្រប់គ្រង។ មិនរក្សាទុកប្រវត្តិសន្ទនាទេ។");
  const askedName=whoIsName(t);
  if(askedName){
    // Customer balances should only be returned to authorized Telegram administrators.
-   if(!await allowed(m.from?.id))return reply(m,"មានតែអ្នកគ្រប់គ្រងដែលបានផ្តល់សិទ្ធិប៉ុណ្ណោះដែលអាចសួរព័ត៌មានបំណុលអតិថិជនបាន។");
-   return answerWhoIs(m,askedName);
+   if(scope.access_mode==="legacy"&&!await allowed(m.from?.id))return reply(m,"មានតែអ្នកគ្រប់គ្រងដែលបានផ្តល់សិទ្ធិប៉ុណ្ណោះដែលអាចសួរព័ត៌មានបំណុលអតិថិជនបាន។");
+   return answerWhoIs(m,askedName,scope);
  }
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)){
   if(!await allowed(m.from?.id))return reply(m,"មានតែអ្នកគ្រប់គ្រងដែលបានផ្តល់សិទ្ធិប៉ុណ្ណោះដែលអាចបន្ថែមឈ្មោះអ្នកផ្ទេរបាន។");
@@ -188,7 +213,7 @@ async function handle(m:any){
  if(m.photo?.length&&!t)return reply(m,"ខ្ញុំបានទទួលរូបភាពហើយ ប៉ុន្តែកំណែនេះត្រូវការឈ្មោះអ្នកផ្ទេរជាអក្សរ។ សូមបញ្ជូនសារជូនដំណឹងពីធនាគារ ឬបន្ថែមឈ្មោះអ្នកផ្ទេរក្នុង Caption។ ខ្ញុំមិនអាចសន្មតពីរូបភាពមិនច្បាស់បានទេ។");
  if(!t)return;
  if(!m.forward_origin&&!m.forward_date&&!/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛)/i.test(t))return;
- return report(m,parseNotice(t));
+ return report(m,parseNotice(t),scope);
 }
 async function callback(cb:any){
  const m=cb.message,choice=val(cb.data),id=cb.id;
@@ -216,8 +241,8 @@ Deno.serve(async(req:Request)=>{
  if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==cfg.secret)return new Response("Unauthorized",{status:401});
  try{
   const u=await req.json(),m=u.message;
-  if(m&&await inBankTopic(m))await handle(m);
-  if(u.callback_query&&await inBankTopic(u.callback_query.message))await callback(u.callback_query);
+  if(m){const scope=await bankScope(m);if(scope){if(await scopeAllows(m,scope))await handle(m,scope);else if(/^\\/(?:bankhelp|bankadd)(?:@\\w+)?\\b/i.test(val(m.text)))await reply(m,"⛔ អ្នកមិនទាន់មានសិទ្ធិប្រើ Assistant ក្នុងក្រុមនេះទេ។ សូមទាក់ទង Admin។");}}
+  if(u.callback_query){const scope=await bankScope(u.callback_query.message);if(scope&&await scopeAllows({from:u.callback_query.from},scope))await callback(u.callback_query);}
   return Response.json({ok:true});
  }catch(e){console.error("Incoming Telegram handling failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
 });
