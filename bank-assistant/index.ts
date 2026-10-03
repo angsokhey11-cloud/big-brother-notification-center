@@ -26,13 +26,16 @@ async function reply(m:any,html:string,extra:Record<string,unknown>={}){
 function parseNotice(raw:string){
  const t=raw.slice(0,4500);
  const grab=(patterns:RegExp[])=>{for(const p of patterns){const x=t.match(p);if(x?.[1])return x[1].trim();}return "";};
- const sender=grab([/(?:sender|from|payer|account holder|received from|ឈ្មោះអ្នកផ្ញើ)\s*[:：\-]\s*([^\n\r]+)/i,/(?:sent by|transfer from)\s+([^\n\r]+)/i]);
- const account=grab([/(?:sender account|from account|payer account|account no\.?|account number)\s*[:：\-]\s*([\d*Xx\- ]{4,28})/i]);
- const currency=/(?:\bKHR\b|៛|\briel\b)/i.test(t)?"KHR":/(?:\bUSD\b|\$|\bdollar\b)/i.test(t)?"USD":"";
- const amt=grab([/(?:amount|received|payment|transfer amount|ចំនួនទឹកប្រាក់)\s*[:：\-]?\s*(?:USD|KHR|US\$|\$|៛)?\s*([\d,]+(?:\.\d{1,4})?)/i,/(?:USD|US\$|\$|KHR|៛)\s*([\d,]+(?:\.\d{1,4})?)/i]);
- const tx=grab([/(?:transaction\s*(?:id|number|no\.?|ref(?:erence)?)|reference\s*(?:id|no\.?|number)|trx\s*id)\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i]);
- const bank=grab([/(?:sender bank|from bank|source bank|bank)\s*[:：\-]\s*([^\n\r]+)/i]);
- return {sender,account:val(account).replace(/[\s-]+/g,""),currency,amount:amt?amount(amt):null,transactionId:tx,bank};
+ // ABA PayWay: "៛208,800 paid by Tan Rothdara (*323) on ... via ABA KHQR (...) at Big Brother by S.ANG. Trx. ID: ..."
+ // 'via ABA KHQR' describes the payment rail/receiving channel; it does NOT establish the sender's bank.
+ const payway=t.match(/(?:៛|KHR\b|\bUSD\b|US\$|\$)\s*([\d,]+(?:\.\d{1,4})?)\s+paid\s+by\s+(.+?)\s*\(\s*([*xX•]*\s*\d{2,8})\s*\)\s+on\b/i);
+ const sender=payway?.[2]?.trim()||grab([/(?:sender|from|payer|account holder|received from|ឈ្មោះអ្នកផ្ញើ)\s*[:：\-]\s*([^\n\r]+)/i,/(?:sent by|transfer from)\s+([^\n\r]+)/i]);
+ const account=payway?.[3]?.replace(/\s+/g,"")||grab([/(?:sender account|from account|payer account|account no\.?|account number)\s*[:：\-]\s*([\d*xX•\- ]{2,28})/i]);
+ const currency=payway?( /^\s*(?:៛|KHR\b)/i.test(t)?"KHR":"USD" ):/(?:៛|\bKHR\b|\briel\b)/i.test(t)?"KHR":/(?:\bUSD\b|US\$|\$|\bdollar\b)/i.test(t)?"USD":"";
+ const rawAmount=payway?.[1]||grab([/(?:amount|received|payment|transfer amount|ចំនួនទឹកប្រាក់)\s*[:：\-]?\s*(?:USD|KHR|US\$|\$|៛)?\s*([\d,]+(?:\.\d{1,4})?)/i,/(?:USD|US\$|\$|KHR|៛)\s*([\d,]+(?:\.\d{1,4})?)/i]);
+ const tx=grab([/\bTrx\.?\s*ID\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i,/(?:transaction\s*(?:id|number|no\.?|ref(?:erence)?)|reference\s*(?:id|no\.?|number))\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i]);
+ const bank=grab([/(?:sender bank|from bank|source bank)\s*[:：\-]\s*([^\n\r]+)/i]);
+ return {sender,account:val(account).replace(/[\s-]+/g,""),currency,amount:rawAmount?amount(rawAmount):null,transactionId:tx,bank,channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):""};
 }
 function combos(rows:Invoice[],sum:number,currency:string){
  const exact=rows.filter(x=>norm(x.currency)===norm(currency)&&Number(x.outstanding)>0.000001).slice(0,16);
@@ -47,9 +50,17 @@ function combos(rows:Invoice[],sum:number,currency:string){
  }
  walk(0,0,[]);return found;
 }
+function noticeDetails(n:ReturnType<typeof parseNotice>){
+ let result="\nPayer: <b>"+escape(n.sender||"Not shown")+"</b>";
+ if(n.account)result+="\nMasked account: "+escape(n.account);
+ if(n.currency&&n.amount!==null)result+="\nAmount: "+escape(n.currency)+" "+escape(n.amount.toLocaleString("en-US",{maximumFractionDigits:2}));
+ if(n.transactionId)result+="\nTransaction ID: "+escape(n.transactionId);
+ if(n.channel)result+="\nPayment channel: "+escape(n.channel)+" (not verified sender bank)";
+ return result;
+}
 async function report(m:any,notice:ReturnType<typeof parseNotice>){
  const client=db();
- if(!notice.sender&&!notice.account)return reply(m,"🔎 <b>Customer not identified.</b>\nThe notification does not show a recognizable sender name or account number.");
+ if(!notice.sender&&!notice.account)return reply(m,"🔎 <b>Customer not identified.</b>"+noticeDetails(notice)+"\nNo recognizable sender information was found.");
  const {data:bankRows,error:bankError}=await client.from("bb_customer_bank_identities").select("identity_id,customer_id,bank_name,account_holder_name,account_number,alternative_names,active").eq("active",true).limit(2000);
  if(bankError)throw bankError;
  const nSender=norm(notice.sender),nBank=norm(notice.bank),nAccount=val(notice.account).replace(/[\s-]+/g,"");
@@ -57,19 +68,18 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>){
  for(const b of (bankRows||[]) as Bank[]){
   if(nBank&&norm(b.bank_name)&&norm(b.bank_name)!==nBank)continue;
   const savedAccount=val(b.account_number).replace(/[\s-]+/g,"");
-  const accountMatch=!!nAccount&&!!savedAccount&&nAccount===savedAccount&&!nAccount.includes("*");
+  const accountMatch=!!nAccount&&!!savedAccount&&nAccount===savedAccount&&!/[\*xX•]/.test(nAccount);
   const nameMatch=!!nSender&&[b.account_holder_name,...(b.alternative_names||[])].some(name=>norm(name)===nSender);
   if(!accountMatch&&!nameMatch)continue;
   candidates.add(b.customer_id);
   strength.set(b.customer_id,accountMatch?"Account number match":"Sender name match");
  }
- if(!candidates.size)return reply(m,"🔎 <b>Customer not identified.</b>\nSender: "+escape(notice.sender||"Not provided")+"\nNo saved bank identity matched. An administrator can teach me using:\n<code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>");
+ if(!candidates.size)return reply(m,"🔎 <b>Transaction read successfully; customer not identified yet.</b>"+noticeDetails(notice)+"\n\nNo saved customer bank identity matches this payer. Please verify the sender and teach me using:\n<code>/bankadd CUSTOMER_ID | BANK | SENDER NAME | OPTIONAL ACCOUNT</code>\nMasked account digits alone are not sufficient to identify a customer.");
  const ids=[...candidates].slice(0,8);
  const {data:people,error:peopleErr}=await client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(peopleErr)throw peopleErr;
  let head=ids.length>1?"⚠️ <b>Shared bank identity: multiple possible customers.</b>":"✅ <b>Possible customer identified.</b>";
- head+="\nSender: "+escape(notice.sender||"Not provided");
- if(notice.currency&&notice.amount!==null)head+="\nTransfer: "+escape(notice.currency)+" "+escape(notice.amount);
+ head+=noticeDetails(notice);
  if(notice.transactionId){
   const [pay,reg,dep]=await Promise.all([
     client.from("payments").select("payment_id").ilike("transaction_id",notice.transactionId).limit(1),
