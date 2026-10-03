@@ -99,12 +99,13 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  let head=people.length>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះត្រូវនឹងអតិថិជនច្រើននាក់</b>":"✅ <b>រកឃើញអតិថិជនដែលអាចត្រូវនឹងឈ្មោះនេះ</b>";
  head+=noticeDetails(notice);
  if(notice.transactionId){
-  const [pay,reg,dep]=await Promise.all([
+  const [pay,reg,dep,cancelled]=await Promise.all([
     client.from("payments").select("payment_id").ilike("transaction_id",notice.transactionId).limit(1),
     client.from("bb_verified_bank_transactions").select("status").ilike("transaction_id",notice.transactionId).limit(1),
-    client.from("company_deposits").select("deposit_id").ilike("collection_transaction_id",notice.transactionId).limit(1)
+    client.from("company_deposits").select("deposit_id").ilike("collection_transaction_id",notice.transactionId).limit(1),
+    client.from("bb_cancelled_bank_transaction_ids").select("transaction_id").ilike("transaction_id",notice.transactionId).limit(1)
   ]);
-  if(pay.data?.length||reg.data?.length||dep.data?.length)head+="\n⚠️ <b>លេខប្រតិបត្តិការនេះមានក្នុងប្រវត្តិទូទាត់ ឬបញ្ជីធនាគាររួចហើយ។ សូមពិនិត្យមុនបន្ត។</b>";
+  if(pay.data?.length||reg.data?.length||dep.data?.length||cancelled.data?.length)head+="\n⚠️ <b>លេខប្រតិបត្តិការនេះមានក្នុងប្រវត្តិទូទាត់ ឬបញ្ជីធនាគាររួចហើយ។ សូមពិនិត្យមុនបន្ត។</b>";
  }
  for(const c of (people||[]) as Customer[]){
   head+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")\nផ្គូផ្គងតាមឈ្មោះអ្នកផ្ទេរ";
