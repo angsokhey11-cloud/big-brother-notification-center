@@ -1,5 +1,5 @@
 // BIG BROTHER: inbound Telegram dispatcher. Topic routing and webhook authentication are configured in Supabase.
-// Never stores incoming messages, slips, conversations or match suggestions.
+// Temporarily queues eligible bank-forward messages only to preserve FIFO processing, then deletes each queue item after handling.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -236,6 +236,63 @@ async function callback(cb:any){
  await tg("editMessageReplyMarkup",{chat_id:m.chat.id,message_id:m.message_id,reply_markup:{inline_keyboard:[]}});
  await reply(m,"✅ បានរក្សាទុកឈ្មោះអ្នកផ្ទេរហើយ។ សារជូនដំណឹងបន្ទាប់អាចផ្គូផ្គងនឹងអតិថិជននេះបាន។");
 }
+
+function queueableNotice(m:any){
+ const t=val(m?.text||m?.caption);
+ if(!t)return false;
+ if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
+ return !!m?.forward_origin||!!m?.forward_date||/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|paid\s+by|Trx\.?\s*ID)/i.test(t);
+}
+async function enqueueNotice(updateId:number,m:any){
+ const client=db();
+ const {error}=await client.from("bb_bank_assistant_queue").upsert({
+   telegram_update_id:updateId,
+   telegram_chat_id:val(m.chat?.id),
+   telegram_thread_id:Number(m.message_thread_id||0),
+   telegram_message_id:Number(m.message_id||0),
+   payload:m
+ },{onConflict:"telegram_update_id",ignoreDuplicates:true});
+ if(error)throw error;
+}
+const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+async function drainTopicQueue(chat:string,thread:number){
+ const owner=crypto.randomUUID(),client=db();
+ const {data:locked,error:lockError}=await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:120});
+ if(lockError||locked!==true)return;
+ try{
+  for(let processed=0;processed<40;processed++){
+   const {data:row,error}=await client.from("bb_bank_assistant_queue")
+     .select("queue_id,payload,attempts").eq("telegram_chat_id",chat).eq("telegram_thread_id",thread)
+     .order("queue_id",{ascending:true}).limit(1).maybeSingle();
+   if(error)throw error;
+   if(!row)break;
+   const m=row.payload;
+   try{
+    const scope=await bankScope(m);
+    if(scope&&await scopeAllows(m,scope))await handle(m,scope);
+    await client.from("bb_bank_assistant_queue").delete().eq("queue_id",row.queue_id);
+   }catch(error){
+    const attempts=Number(row.attempts||0)+1;
+    const message=error instanceof Error?error.message:"Unknown processing error";
+    console.error("Queued Telegram handling failed",message);
+    if(attempts>=3){
+      try{await reply(m,"⚠️ មិនអាចដំណើរការសារនេះបាននៅពេលនេះទេ។ សូមសាកល្បងបញ្ជូនម្តងទៀត។");}catch(_){}
+      await client.from("bb_bank_assistant_queue").delete().eq("queue_id",row.queue_id);
+    }else{
+      await client.from("bb_bank_assistant_queue").update({attempts,last_error:message.slice(0,500)}).eq("queue_id",row.queue_id);
+      await sleep(700);
+      continue;
+    }
+   }
+   await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:120});
+   const {count}=await client.from("bb_bank_assistant_queue").select("queue_id",{count:"exact",head:true})
+     .eq("telegram_chat_id",chat).eq("telegram_thread_id",thread);
+   if((count||0)>0)await sleep(3200);
+  }
+ }finally{
+  await client.rpc("bb_bank_assistant_unlock",{p_chat:chat,p_thread:thread,p_owner:owner}).catch(()=>{});
+ }
+}
 Deno.serve(async(req:Request)=>{
  if(req.method!=="POST")return new Response("Method not allowed",{status:405});
  if(!token())return new Response("Bot not configured",{status:503});
@@ -244,7 +301,23 @@ Deno.serve(async(req:Request)=>{
  if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==cfg.secret)return new Response("Unauthorized",{status:401});
  try{
   const u=await req.json(),m=u.message;
-  if(m){const scope=await bankScope(m);if(scope){if(await scopeAllows(m,scope))await handle(m,scope);else if(val(m.text).startsWith("/bankhelp")||val(m.text).startsWith("/bankadd"))await reply(m,"⛔ អ្នកមិនទាន់មានសិទ្ធិប្រើ Assistant ក្នុងក្រុមនេះទេ។ សូមទាក់ទង Admin។");}}
+  if(m){
+    const scope=await bankScope(m);
+    if(scope){
+      if(await scopeAllows(m,scope)){
+        if(queueableNotice(m)){
+          await enqueueNotice(Number(u.update_id||0),m);
+          const task=drainTopicQueue(val(m.chat.id),Number(m.message_thread_id||0));
+          try{(globalThis as any).EdgeRuntime?.waitUntil?.(task);}catch(_){}
+          if(!(globalThis as any).EdgeRuntime?.waitUntil)await task;
+        }else{
+          await handle(m,scope);
+        }
+      }else if(val(m.text).startsWith("/bankhelp")||val(m.text).startsWith("/bankadd")){
+        await reply(m,"⛔ អ្នកមិនទាន់មានសិទ្ធិប្រើ Assistant ក្នុងក្រុមនេះទេ។ សូមទាក់ទង Admin។");
+      }
+    }
+  }
   if(u.callback_query){const scope=await bankScope(u.callback_query.message);if(scope&&await scopeAllows({from:u.callback_query.from},scope))await callback(u.callback_query);}
   return Response.json({ok:true});
  }catch(e){console.error("Incoming Telegram handling failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
