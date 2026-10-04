@@ -46,16 +46,73 @@ async function reply(m:any,html:string,extra:Record<string,unknown>={}){
  return tg("sendMessage",destination);
 }
 function parseNotice(raw:string){
- const t=raw.slice(0,4500);
+ const t=raw.slice(0,4500).trim();
  const grab=(patterns:RegExp[])=>{for(const p of patterns){const x=t.match(p);if(x?.[1])return x[1].trim();}return "";};
- // ABA PayWay: sender name is useful; masked account suffix is deliberately discarded.
- // "via ABA KHQR" is a payment channel, NOT a verified sender bank.
+ const cleanSender=(value:string)=>val(value)
+   .replace(/\s+(?:on|at|via|trx\.?\s*id|transaction\s*(?:id|no\.?|number)|reference\s*(?:id|no\.?|number))\b.*$/i,"")
+   .replace(/^[\s:;|,\-–—]+|[\s:;|,\-–—]+$/g,"")
+   .trim();
+
+ // High-confidence ABA PayWay parser stays first.
  const payway=t.match(/(?:៛|KHR\b|\bUSD\b|US\$|\$)\s*([\d,]+(?:\.\d{1,4})?)\s+paid\s+by\s+(.+?)\s*\(\s*[*xX•]*\s*\d{2,8}\s*\)\s+on\b/i);
- const sender=payway?.[2]?.trim()||grab([/(?:sender|from|payer|account holder|received from|ឈ្មោះអ្នកផ្ញើ)\s*[:：\-]\s*([^\n\r]+)/i,/(?:sent by|transfer from)\s+([^\n\r]+)/i]);
- const currency=payway?( /^\s*(?:៛|KHR\b)/i.test(t)?"KHR":"USD" ):/(?:៛|\bKHR\b|\briel\b)/i.test(t)?"KHR":/(?:\bUSD\b|US\$|\$|\bdollar\b)/i.test(t)?"USD":"";
- const rawAmount=payway?.[1]||grab([/(?:amount|received|payment|transfer amount|ចំនួនទឹកប្រាក់)\s*[:：\-]?\s*(?:USD|KHR|US\$|\$|៛)?\s*([\d,]+(?:\.\d{1,4})?)/i,/(?:USD|US\$|\$|KHR|៛)\s*([\d,]+(?:\.\d{1,4})?)/i]);
- const tx=grab([/\bTrx\.?\s*ID\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i,/(?:transaction\s*(?:id|number|no\.?|ref(?:erence)?)|reference\s*(?:id|no\.?|number))\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i]);
- return {sender,currency,amount:rawAmount?amount(rawAmount):null,transactionId:tx,channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):""};
+
+ // Generic money + sender patterns. Transaction ID is optional.
+ // Examples:
+ // "$50 from Ly Sreyleak"
+ // "50$ from Ly Sreyleak"
+ // "Received USD 50 from Ly Sreyleak"
+ // "Ly Sreyleak paid $50"
+ // "Ly Sreyleak transfer 50 USD"
+ // "50$ - Ly Sreyleak"
+ const moneyToken="(?:USD|US\\$|\\$|KHR|៛)\\s*[\\d,]+(?:\\.\\d{1,4})?|[\\d,]+(?:\\.\\d{1,4})?\\s*(?:USD|US\\$|\\$|KHR|៛)";
+ const genericPatterns=[
+   new RegExp("(?:received|receive|payment|paid|transfer(?:red)?|sent)?\\s*("+moneyToken+")\\s*(?:from|by|payer|sender)\\s*[:：-]?\\s*([^\\n\\r]+)","i"),
+   new RegExp("^\\s*("+moneyToken+")\\s*[-–—|:]\\s*([^\\n\\r]+)","i"),
+   new RegExp("^\\s*([^\\n\\r]{2,140}?)\\s+(?:paid|pays|sent|send|transfer(?:red)?|transfers?)\\s*[:：-]?\\s*("+moneyToken+")","i")
+ ];
+
+ let genericAmountToken="",genericSender="";
+ for(let i=0;i<genericPatterns.length;i++){
+   const m=t.match(genericPatterns[i]);
+   if(!m)continue;
+   if(i<2){genericAmountToken=val(m[1]);genericSender=cleanSender(val(m[2]));}
+   else {genericSender=cleanSender(val(m[1]));genericAmountToken=val(m[2]);}
+   if(genericAmountToken&&genericSender)break;
+ }
+
+ const labelledSender=grab([
+   /(?:sender|from|payer|account holder|received from|ឈ្មោះអ្នកផ្ញើ|អ្នកផ្ទេរ)\s*[:：\-]\s*([^\n\r]+)/i,
+   /(?:sent by|transfer from|paid by)\s+([^\n\r]+)/i
+ ]);
+ const sender=cleanSender(payway?.[2]?.trim()||genericSender||labelledSender);
+
+ const moneySource=payway?((t.match(/(?:៛|KHR\b|\bUSD\b|US\$|\$)\s*[\d,]+(?:\.\d{1,4})?/i)||[])[0]||""):genericAmountToken;
+ const currency=/(?:៛|\bKHR\b|\briel\b)/i.test(moneySource||t)
+   ?"KHR"
+   :/(?:\bUSD\b|US\$|\$|\bdollar\b)/i.test(moneySource||t)
+     ?"USD"
+     :"";
+
+ const rawAmount=payway?.[1]
+   ||(genericAmountToken.match(/[\d,]+(?:\.\d{1,4})?/)||[])[0]
+   ||grab([
+     /(?:amount|received|payment|transfer amount|ចំនួនទឹកប្រាក់)\s*[:：\-]?\s*(?:USD|KHR|US\$|\$|៛)?\s*([\d,]+(?:\.\d{1,4})?)/i,
+     /(?:USD|US\$|\$|KHR|៛)\s*([\d,]+(?:\.\d{1,4})?)/i,
+     /([\d,]+(?:\.\d{1,4})?)\s*(?:USD|US\$|\$|KHR|៛)/i
+   ]);
+
+ const tx=grab([
+   /\bTrx\.?\s*ID\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i,
+   /(?:transaction\s*(?:id|number|no\.?|ref(?:erence)?)|reference\s*(?:id|no\.?|number))\s*[:：#\-]?\s*([A-Z0-9\-]{5,80})/i
+ ]);
+
+ return {
+   sender,
+   currency,
+   amount:rawAmount?amount(rawAmount):null,
+   transactionId:tx,
+   channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):""
+ };
 }
 function combos(rows:Invoice[],sum:number,currency:string){
  const exact=rows.filter(x=>norm(x.currency)===norm(currency)&&Number(x.outstanding)>0.000001).slice(0,16);
