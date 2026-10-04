@@ -301,9 +301,55 @@ function bankAddReplyData(m:any){
  if(parts.length===2&&parts.every(Boolean))return {customer:parts[0],holder:parts[1]};
  return null;
 }
+async function setPendingBankAdd(m:any){
+ const userId=val(m?.from?.id),chat=val(m?.chat?.id),thread=Number(m?.message_thread_id||0);
+ if(!userId||!chat)return;
+ const {error}=await db().from("bb_bank_assistant_pending_actions").upsert({
+   telegram_chat_id:chat,
+   telegram_thread_id:thread,
+   telegram_user_id:userId,
+   action:"bankadd",
+   expires_at:new Date(Date.now()+5*60*1000).toISOString(),
+   created_at:new Date().toISOString()
+ },{onConflict:"telegram_chat_id,telegram_thread_id,telegram_user_id,action"});
+ if(error)throw error;
+}
+async function takePendingBankAdd(m:any){
+ const userId=val(m?.from?.id),chat=val(m?.chat?.id),thread=Number(m?.message_thread_id||0);
+ if(!userId||!chat)return null;
+ const client=db();
+ const {data,error}=await client.from("bb_bank_assistant_pending_actions")
+   .select("expires_at")
+   .eq("telegram_chat_id",chat)
+   .eq("telegram_thread_id",thread)
+   .eq("telegram_user_id",userId)
+   .eq("action","bankadd")
+   .maybeSingle();
+ if(error)throw error;
+ if(!data)return null;
+ if(new Date(data.expires_at).getTime()<Date.now()){
+   await client.from("bb_bank_assistant_pending_actions")
+     .delete()
+     .eq("telegram_chat_id",chat)
+     .eq("telegram_thread_id",thread)
+     .eq("telegram_user_id",userId)
+     .eq("action","bankadd");
+   return null;
+ }
+ const parts=val(m?.text||m?.caption).split("|").map(x=>x.trim());
+ if(parts.length!==2||!parts.every(Boolean))return null;
+ await client.from("bb_bank_assistant_pending_actions")
+   .delete()
+   .eq("telegram_chat_id",chat)
+   .eq("telegram_thread_id",thread)
+   .eq("telegram_user_id",userId)
+   .eq("action","bankadd");
+ return {customer:parts[0],holder:parts[1]};
+}
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
  const bankAddReply=bankAddReplyData(m);
+ const pendingBankAdd=bankAddReply?null:await takePendingBankAdd(m);
  if(/^\/(?:help|bankhelp)(?:@\w+)?$/i.test(t))return reply(m,
 "🏦 <b>BIG BROTHER — Bank Payment Assistant</b>\n"+
 "ខ្ញុំផ្គូផ្គង <b>ឈ្មោះអ្នកផ្ទេរ + ចំនួនទឹកប្រាក់</b> ទៅអតិថិជន និងវិក្កយបត្រជំពាក់។\n\n"+
@@ -331,13 +377,14 @@ async function handle(m:any,scope:RouteScope){
    return answerWhoIs(m,askedName,scope);
  }
  if(/^\/bankadd(?:@\w+)?\s*$/i.test(t)){
+  await setPendingBankAdd(m);
   return reply(m,
-    "BB_BANKADD_PROMPT\n🏦 <b>Request sender mapping</b>\nReply with:\n<code>CUSTOMER_ID | SENDER NAME</code>\n\nExample:\n<code>CUS-0255 | Him Techchong</code>",
+    "BB_BANKADD_PROMPT\n🏦 <b>Request sender mapping</b>\nSend your next message as:\n<code>CUSTOMER_ID | SENDER NAME</code>\n\nExample:\n<code>CUS-0255 | Him Techchong</code>\n\n⏱ Waiting for 5 minutes.",
     {reply_markup:{force_reply:true,selective:true,input_field_placeholder:"CUS-0255 | Him Techchong"}}
   );
  }
- if(/^\/bankadd(?:@\w+)?\b/i.test(t)||bankAddReply){
-  const data=bankAddReply||addCmd(t);
+ if(/^\/bankadd(?:@\w+)?\b/i.test(t)||bankAddReply||pendingBankAdd){
+  const data=pendingBankAdd||bankAddReply||addCmd(t);
   if(!data)return reply(m,"ទម្រង់៖ <code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
   const {data:c}=await db().from("customers").select("customer_id,customer_name").eq("customer_id",data.customer).eq("active",true).maybeSingle();
   if(!c)return reply(m,"រកមិនឃើញលេខសម្គាល់អតិថិជន។ សូមពិនិត្យក្នុង Customer Editor។");
