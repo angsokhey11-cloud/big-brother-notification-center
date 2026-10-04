@@ -213,10 +213,19 @@ async function handle(m:any,scope:RouteScope){
   return reply(m,"🏦 <b>បញ្ជាក់ការបន្ថែមឈ្មោះអ្នកផ្ទេរ</b>\nអតិថិជន៖ "+escape(c.customer_name)+"\nលេខសម្គាល់អតិថិជន៖ <code>"+escape(data.customer)+"</code>\nឈ្មោះម្ចាស់គណនី៖ <code>"+escape(data.holder)+"</code>\nឈ្មោះនេះនឹងត្រូវផ្គូផ្គងដោយមិនប្រកាន់ធនាគារ។ សូមផ្ទៀងផ្ទាត់មុនរក្សាទុក។",{reply_markup:{inline_keyboard:[[{text:"✅ បញ្ជាក់ និងរក្សាទុក",callback_data:"bbbank:confirm"},{text:"បោះបង់",callback_data:"bbbank:cancel"}]]}});
  }
  // Only inspect forwarded messages or direct slips/text notifications posted inside our dedicated group.
- if(m.photo?.length&&!t)return reply(m,"ខ្ញុំបានទទួលរូបភាពហើយ ប៉ុន្តែកំណែនេះត្រូវការឈ្មោះអ្នកផ្ទេរជាអក្សរ។ សូមបញ្ជូនសារជូនដំណឹងពីធនាគារ ឬបន្ថែមឈ្មោះអ្នកផ្ទេរក្នុង Caption។ ខ្ញុំមិនអាចសន្មតពីរូបភាពមិនច្បាស់បានទេ។");
- if(!t)return;
+ if(!t){
+  if(m.forward_origin||m.forward_date){
+   return reply(m,"❌ <b>REJECTED — មិនស្គាល់ទម្រង់សារធនាគារ</b>\nខ្ញុំមិនអាចអានឈ្មោះអ្នកផ្ទេរ ចំនួនទឹកប្រាក់ ឬលេខប្រតិបត្តិការពីសារនេះបានទេ។ សូមបញ្ជូនសារជូនដំណឹងធនាគារដែលមានអក្សរ (Text/Caption)។");
+  }
+  if(m.photo?.length)return reply(m,"❌ <b>REJECTED — រូបភាពមិនអាចអានដោយកំណែនេះ</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារជាអក្សរ ឬបន្ថែម Caption។");
+  return;
+ }
  if(!m.forward_origin&&!m.forward_date&&!/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛)/i.test(t))return;
- return report(m,parseNotice(t),scope);
+ const notice=parseNotice(t);
+ if((m.forward_origin||m.forward_date)&&!notice.sender){
+  return reply(m,"❌ <b>REJECTED — មិនស្គាល់ទម្រង់សារធនាគារ</b>"+noticeDetails(notice)+"\n\nខ្ញុំមិនអាចកំណត់ឈ្មោះអ្នកផ្ទេរពីសារនេះបានទេ។ សូមពិនិត្យទម្រង់សារ ឬបន្ថែម Parser សម្រាប់ធនាគារនេះ។");
+ }
+ return report(m,notice,scope);
 }
 async function callback(cb:any){
  const m=cb.message,choice=val(cb.data),id=cb.id;
@@ -239,9 +248,12 @@ async function callback(cb:any){
 
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
- if(!t)return false;
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
- return !!m?.forward_origin||!!m?.forward_date||/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|paid\s+by|Trx\.?\s*ID)/i.test(t);
+ // Every forwarded item is queued so it receives one ordered result,
+ // including unsupported bank formats that must be explicitly rejected.
+ if(m?.forward_origin||m?.forward_date)return true;
+ if(!t)return false;
+ return /(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|paid\s+by|Trx\.?\s*ID)/i.test(t);
 }
 async function enqueueNotice(updateId:number,m:any){
  const client=db();
