@@ -47,7 +47,8 @@ async function ensureTelegramCommands(){
   commands:[
    {command:"help",description:"Show supported bank notice formats"},
    {command:"bankhelp",description:"Show Bank Assistant help"},
-   {command:"bankadd",description:"Request sender mapping (Admin approval required)"}
+   {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
+   {command:"myid",description:"Show your Telegram user ID"}
   ],
   scope:{type:"all_group_chats"}
  });
@@ -370,6 +371,9 @@ async function handle(m:any,scope:RouteScope){
 "ការរក្សាទុកត្រូវការ Admin អនុម័តជាមុន។\n\n"+
 "Forward សារធនាគារច្រើនបាន។ ខ្ញុំនឹងឆ្លើយតាមលំដាប់ក្នុង Topic ដដែល។"
 );
+ if(/^\/myid(?:@\w+)?$/i.test(t))return reply(m,
+  "🪪 <b>Your Telegram User ID</b>\n<code>"+escape(m.from?.id)+"</code>\n\nSend this ID to an Admin to enable approval rights."
+ );
  const askedName=whoIsName(t);
  if(askedName){
    // Customer balances should only be returned to authorized Telegram administrators.
