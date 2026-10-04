@@ -383,8 +383,7 @@ async function handle(m:any,scope:RouteScope){
  if(/^\/bankadd(?:@\w+)?\s*$/i.test(t)){
   await setPendingBankAdd(m);
   return reply(m,
-    "BB_BANKADD_PROMPT\n🏦 <b>Request sender mapping</b>\nSend your next message as:\n<code>CUSTOMER_ID | SENDER NAME</code>\n\nExample:\n<code>CUS-0255 | Him Techchong</code>\n\n⏱ Waiting for 5 minutes.",
-    {reply_markup:{force_reply:true,selective:true,input_field_placeholder:"CUS-0255 | Him Techchong"}}
+    "BB_BANKADD_PROMPT\n🏦 <b>Request sender mapping</b>\nSend your next message as:\n<code>CUSTOMER_ID | SENDER NAME</code>\n\nExample:\n<code>CUS-0255 | Him Techchong</code>\n\n⏱ Waiting for 5 minutes."
   );
  }
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)||bankAddReply||pendingBankAdd){
