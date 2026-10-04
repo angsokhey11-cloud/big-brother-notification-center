@@ -40,6 +40,19 @@ async function scopeAllows(m:any,scope:RouteScope){
 const token=()=>val(Deno.env.get("TELEGRAM_BOT_TOKEN"));
 const db=()=>createClient(Deno.env.get("SUPABASE_URL")||"",Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",{auth:{persistSession:false}});
 async function tg(method:string,body:Record<string,unknown>){const r=await fetch("https://api.telegram.org/bot"+token()+"/"+method,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});if(!r.ok)throw Error("Telegram request failed: "+r.status);return r.json();}
+let commandsReady=false;
+async function ensureTelegramCommands(){
+ if(commandsReady)return;
+ const result=await tg("setMyCommands",{
+  commands:[
+   {command:"help",description:"Show supported bank notice formats"},
+   {command:"bankhelp",description:"Show Bank Assistant help"},
+   {command:"bankadd",description:"Admin: add sender name to a customer"}
+  ],
+  scope:{type:"all_group_chats"}
+ });
+ if(result?.ok)commandsReady=true;
+}
 async function reply(m:any,html:string,extra:Record<string,unknown>={}){
  const destination:Record<string,unknown>={chat_id:m.chat.id,reply_to_message_id:m.message_id,text:html.slice(0,3900),parse_mode:"HTML",disable_web_page_preview:true,...extra};
  if(Number(m.message_thread_id)>0)destination.message_thread_id=m.message_thread_id;
@@ -423,6 +436,7 @@ Deno.serve(async(req:Request)=>{
  if(error||!cfg?.secret)return new Response("Webhook not configured",{status:503});
  if(val(req.headers.get("X-Telegram-Bot-Api-Secret-Token"))!==cfg.secret)return new Response("Unauthorized",{status:401});
  try{
+  try{await ensureTelegramCommands();}catch(e){console.warn("Telegram command menu setup failed",e instanceof Error?e.message:"error");}
   const u=await req.json(),m=u.message;
   if(m){
     const scope=await bankScope(m);
