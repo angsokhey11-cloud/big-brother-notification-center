@@ -294,8 +294,16 @@ function addCmd(t:string){
  if(parts.length>=3&&parts[0]&&parts[2])return {customer:parts[0],holder:parts[2]};
  return null;
 }
+function bankAddReplyData(m:any){
+ const replyText=val(m?.reply_to_message?.text||m?.reply_to_message?.caption);
+ if(!replyText.includes("BB_BANKADD_PROMPT"))return null;
+ const parts=val(m?.text||m?.caption).split("|").map(x=>x.trim());
+ if(parts.length===2&&parts.every(Boolean))return {customer:parts[0],holder:parts[1]};
+ return null;
+}
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
+ const bankAddReply=bankAddReplyData(m);
  if(/^\/(?:help|bankhelp)(?:@\w+)?$/i.test(t))return reply(m,
 "🏦 <b>BIG BROTHER — Bank Payment Assistant</b>\n"+
 "ខ្ញុំផ្គូផ្គង <b>ឈ្មោះអ្នកផ្ទេរ + ចំនួនទឹកប្រាក់</b> ទៅអតិថិជន និងវិក្កយបត្រជំពាក់។\n\n"+
@@ -322,12 +330,17 @@ async function handle(m:any,scope:RouteScope){
    if(scope.access_mode==="legacy"&&!await allowed(m.from?.id))return reply(m,"មានតែអ្នកគ្រប់គ្រងដែលបានផ្តល់សិទ្ធិប៉ុណ្ណោះដែលអាចសួរព័ត៌មានបំណុលអតិថិជនបាន។");
    return answerWhoIs(m,askedName,scope);
  }
- if(/^\/bankadd(?:@\w+)?\b/i.test(t)){
-  const data=addCmd(t);
+ if(/^\/bankadd(?:@\w+)?\s*$/i.test(t)){
+  return reply(m,
+    "BB_BANKADD_PROMPT\n🏦 <b>Request sender mapping</b>\nReply with:\n<code>CUSTOMER_ID | SENDER NAME</code>\n\nExample:\n<code>CUS-0255 | Him Techchong</code>",
+    {reply_markup:{force_reply:true,selective:true,input_field_placeholder:"CUS-0255 | Him Techchong"}}
+  );
+ }
+ if(/^\/bankadd(?:@\w+)?\b/i.test(t)||bankAddReply){
+  const data=bankAddReply||addCmd(t);
   if(!data)return reply(m,"ទម្រង់៖ <code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
   const {data:c}=await db().from("customers").select("customer_id,customer_name").eq("customer_id",data.customer).eq("active",true).maybeSingle();
   if(!c)return reply(m,"រកមិនឃើញលេខសម្គាល់អតិថិជន។ សូមពិនិត្យក្នុង Customer Editor។");
-  // No pending conversation stored: confirmation details live only in this bot message.
   return reply(m,"🏦 <b>សំណើបន្ថែមឈ្មោះអ្នកផ្ទេរ</b>\nអតិថិជន៖ "+escape(c.customer_name)+"\nលេខសម្គាល់អតិថិជន៖ <code>"+escape(data.customer)+"</code>\nឈ្មោះម្ចាស់គណនី៖ <code>"+escape(data.holder)+"</code>\n\n⚠️ <b>មិនទាន់បានរក្សាទុកទេ។ ត្រូវការ Admin អនុម័ត។</b>\nឈ្មោះនេះនឹងត្រូវផ្គូផ្គងដោយមិនប្រកាន់ធនាគារ។",{reply_markup:{inline_keyboard:[[{text:"✅ Admin Approve & Save",callback_data:"bbbank:confirm"},{text:"❌ Reject",callback_data:"bbbank:cancel"}]]}});
  }
  // Only inspect forwarded messages or direct slips/text notifications posted inside our dedicated group.
