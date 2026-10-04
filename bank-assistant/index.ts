@@ -386,11 +386,20 @@ async function handle(m:any,scope:RouteScope){
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)||bankAddReply||pendingBankAdd){
   const data=pendingBankAdd||bankAddReply||addCmd(t);
   if(!data)return reply(m,"ទម្រង់៖ <code>/bankadd CUSTOMER_ID | SENDER NAME</code>");
-  const {data:customerRows,error:customerError}=await db().rpc("bb_find_customer_by_normalized_id",{p_customer_id:data.customer});
+  const requestedCustomerId=val(data.customer)
+    .normalize("NFKC")
+    .replace(/[\u200b-\u200d\ufeff]/g,"")
+    .replace(/[‐‑‒–—−]/g,"-")
+    .replace(/\s+/g,"")
+    .toUpperCase();
+  const {data:c,error:customerError}=await db().from("customers")
+    .select("customer_id,customer_name")
+    .eq("customer_id",requestedCustomerId)
+    .eq("active",true)
+    .maybeSingle();
   if(customerError)throw customerError;
-  const c=customerRows?.[0]||null;
   if(!c)return reply(m,"រកមិនឃើញលេខសម្គាល់អតិថិជន។ សូមពិនិត្យក្នុង Customer Editor។");
-  return reply(m,"🏦 <b>សំណើបន្ថែមឈ្មោះអ្នកផ្ទេរ</b>\nអតិថិជន៖ "+escape(c.customer_name)+"\nលេខសម្គាល់អតិថិជន៖ <code>"+escape(data.customer)+"</code>\nឈ្មោះម្ចាស់គណនី៖ <code>"+escape(data.holder)+"</code>\n\n⚠️ <b>មិនទាន់បានរក្សាទុកទេ។ ត្រូវការ Admin អនុម័ត។</b>\nឈ្មោះនេះនឹងត្រូវផ្គូផ្គងដោយមិនប្រកាន់ធនាគារ។",{reply_markup:{inline_keyboard:[[{text:"✅ Admin Approve & Save",callback_data:"bbbank:confirm"},{text:"❌ Reject",callback_data:"bbbank:cancel"}]]}});
+  return reply(m,"🏦 <b>សំណើបន្ថែមឈ្មោះអ្នកផ្ទេរ</b>\nអតិថិជន៖ "+escape(c.customer_name)+"\nលេខសម្គាល់អតិថិជន៖ <code>"+escape(c.customer_id)+"</code>\nឈ្មោះម្ចាស់គណនី៖ <code>"+escape(data.holder)+"</code>\n\n⚠️ <b>មិនទាន់បានរក្សាទុកទេ។ ត្រូវការ Admin អនុម័ត។</b>\nឈ្មោះនេះនឹងត្រូវផ្គូផ្គងដោយមិនប្រកាន់ធនាគារ។",{reply_markup:{inline_keyboard:[[{text:"✅ Admin Approve & Save",callback_data:"bbbank:confirm"},{text:"❌ Reject",callback_data:"bbbank:cancel"}]]}});
  }
  // Only inspect forwarded messages or direct slips/text notifications posted inside our dedicated group.
  if(!t){
