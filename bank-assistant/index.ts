@@ -59,6 +59,11 @@ async function reply(m:any,html:string,extra:Record<string,unknown>={}){
  if(Number(m.message_thread_id)>0)destination.message_thread_id=m.message_thread_id;
  return tg("sendMessage",destination);
 }
+async function clearReplyMarkup(chatId:unknown,messageId:unknown){
+ const chat=val(chatId),id=Number(messageId||0);
+ if(!chat||!Number.isSafeInteger(id)||id<1)return;
+ try{await tg("editMessageReplyMarkup",{chat_id:chat,message_id:id,reply_markup:{inline_keyboard:[]}});}catch(_){}
+}
 function parseNotice(raw:string){
  const t=raw.slice(0,4500).trim();
  const grab=(patterns:RegExp[])=>{for(const p of patterns){const x=t.match(p);if(x?.[1])return x[1].trim();}return "";};
@@ -302,7 +307,7 @@ function bankAddReplyData(m:any){
  if(parts.length===2&&parts.every(Boolean))return {customer:parts[0],holder:parts[1]};
  return null;
 }
-async function setPendingBankAdd(m:any){
+async function setPendingBankAdd(m:any,promptMessageId?:number){
  const userId=val(m?.from?.id),chat=val(m?.chat?.id),thread=Number(m?.message_thread_id||0);
  if(!userId||!chat)return;
  const {error}=await db().from("bb_bank_assistant_pending_actions").upsert({
@@ -311,7 +316,8 @@ async function setPendingBankAdd(m:any){
    telegram_user_id:userId,
    action:"bankadd",
    expires_at:new Date(Date.now()+5*60*1000).toISOString(),
-   created_at:new Date().toISOString()
+   created_at:new Date().toISOString(),
+   prompt_message_id:Number(promptMessageId||0)||null
  },{onConflict:"telegram_chat_id,telegram_thread_id,telegram_user_id,action"});
  if(error)throw error;
 }
@@ -320,7 +326,7 @@ async function takePendingBankAdd(m:any){
  if(!userId||!chat)return null;
  const client=db();
  const {data,error}=await client.from("bb_bank_assistant_pending_actions")
-   .select("expires_at")
+   .select("expires_at,prompt_message_id")
    .eq("telegram_chat_id",chat)
    .eq("telegram_thread_id",thread)
    .eq("telegram_user_id",userId)
@@ -339,6 +345,7 @@ async function takePendingBankAdd(m:any){
  }
  const parts=val(m?.text||m?.caption).split("|").map(x=>x.trim());
  if(parts.length!==2||!parts.every(Boolean))return null;
+ await clearReplyMarkup(chat,data.prompt_message_id);
  await client.from("bb_bank_assistant_pending_actions")
    .delete()
    .eq("telegram_chat_id",chat)
@@ -381,10 +388,11 @@ async function handle(m:any,scope:RouteScope){
    return answerWhoIs(m,askedName,scope);
  }
  if(/^\/bankadd(?:@\w+)?\s*$/i.test(t)){
-  await setPendingBankAdd(m);
-  return reply(m,
+  const sent=await reply(m,
     "BB_BANKADD_PROMPT\n🏦 <b>Request sender mapping</b>\nSend your next message as:\n<code>CUSTOMER_ID | SENDER NAME</code>\n\nExample:\n<code>CUS-0255 | Him Techchong</code>\n\n⏱ Waiting for 5 minutes."
   );
+  await setPendingBankAdd(m,Number(sent?.result?.message_id||0));
+  return sent;
  }
  if(/^\/bankadd(?:@\w+)?\b/i.test(t)||bankAddReply||pendingBankAdd){
   const data=pendingBankAdd||bankAddReply||addCmd(t);
