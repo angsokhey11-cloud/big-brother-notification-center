@@ -283,7 +283,25 @@ function addCmd(t:string){
 }
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
- if(/^\/bankhelp(?:@\w+)?$/i.test(t))return reply(m,"🏦 <b>BIG BROTHER Bank Assistant</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារមកទីនេះ ឬសួរ៖\n• Who is KEO LAKHENA?\n• តើ KEO LAKHENA ជានរណា?\n• តើ KEO LAKHENA ជាអតិថិជនណា?\nដើម្បីបន្ថែមឈ្មោះអ្នកផ្ទេរ សូមប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\nត្រូវមានការបញ្ជាក់ពីអ្នកគ្រប់គ្រង។ មិនរក្សាទុកប្រវត្តិសន្ទនាទេ។");
+ if(/^\/(?:help|bankhelp)(?:@\w+)?$/i.test(t))return reply(m,
+"🏦 <b>BIG BROTHER — Bank Payment Assistant</b>\n"+
+"ខ្ញុំផ្គូផ្គង <b>ឈ្មោះអ្នកផ្ទេរ + ចំនួនទឹកប្រាក់</b> ទៅអតិថិជន និងវិក្កយបត្រជំពាក់។\n\n"+
+"<b>ទម្រង់ដែលគាំទ្រ៖</b>\n"+
+"• <code>$50 from Ly Sreyleak</code>\n"+
+"• <code>50$ from Ly Sreyleak</code>\n"+
+"• <code>Received USD 50 from Ly Sreyleak</code>\n"+
+"• <code>Ly Sreyleak paid $50</code>\n"+
+"• <code>Ly Sreyleak transfer 50 USD</code>\n"+
+"• <code>50$ - Ly Sreyleak</code>\n"+
+"• ABA PayWay / KHQR notification format\n\n"+
+"<b>Transaction ID:</b> មិនចាំបាច់មានទេ។ បើមាន ខ្ញុំនឹងប្រើវាសម្រាប់ពិនិត្យ duplicate។\n\n"+
+"<b>ស្វែងរកឈ្មោះអ្នកផ្ទេរ៖</b>\n"+
+"• <code>Who is KEO LAKHENA?</code>\n"+
+"• <code>តើ KEO LAKHENA ជានរណា?</code>\n\n"+
+"<b>Admin add sender name:</b>\n"+
+"<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\n\n"+
+"Forward សារធនាគារច្រើនបាន។ ខ្ញុំនឹងឆ្លើយតាមលំដាប់ក្នុង Topic ដដែល។"
+);
  const askedName=whoIsName(t);
  if(askedName){
    // Customer balances should only be returned to authorized Telegram administrators.
