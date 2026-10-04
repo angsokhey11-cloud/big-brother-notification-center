@@ -498,7 +498,10 @@ async function drainTopicQueue(chat:string,thread:number){
    await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45});
    const {count}=await client.from("bb_bank_assistant_queue").select("queue_id",{count:"exact",head:true})
      .eq("telegram_chat_id",chat).eq("telegram_thread_id",thread);
-   if((count||0)>0)await sleep(3200);
+   const backlog=count||0;
+   if(backlog===1)await sleep(250);
+   else if(backlog<=4&&backlog>1)await sleep(900);
+   else if(backlog>4)await sleep(2600);
   }
  }finally{
   await client.rpc("bb_bank_assistant_unlock",{p_chat:chat,p_thread:thread,p_owner:owner}).catch(()=>{});
