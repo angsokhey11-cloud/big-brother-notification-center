@@ -16,9 +16,9 @@ async function bankScope(m:any):Promise<RouteScope|null>{
  if(!m?.chat?.id)return null;
  const chat=val(m.chat.id),thread=Number(m.message_thread_id||0);
  const client=db();
- const {data:legacy,error:legacyError}=await client.from("bb_telegram_assistant_routes").select("telegram_chat_id,telegram_thread_id").eq("assistant_key","bank_assistant").eq("active",true).maybeSingle();
+ const {data:legacy,error:legacyError}=await client.from("bb_telegram_assistant_routes").select("route_id").eq("assistant_key","bank_assistant").eq("telegram_chat_id",chat).eq("telegram_thread_id",thread).eq("active",true).limit(1);
  if(legacyError)throw legacyError;
- if(legacy&&chat===val(legacy.telegram_chat_id)&&thread===Number(legacy.telegram_thread_id))return {location_code:null,access_mode:"legacy"};
+ if(legacy?.length)return {location_code:null,access_mode:"legacy"};
  const {data:routes,error}=await client.from("bb_telegram_assistant_group_routes").select("location_code,access_mode")
  .eq("assistant_key","bank_assistant").eq("telegram_chat_id",chat).eq("telegram_thread_id",thread).eq("active",true).limit(1);
  if(error)throw error;
