@@ -10,7 +10,7 @@ const escape=(x:unknown)=>val(x).replace(/[&<>]/g,(c)=>({"&":"&amp;","<":"&lt;",
 type Bank={identity_id:number,customer_id:string,bank_name:string,account_holder_name:string,account_number:string|null,alternative_names:string[],active:boolean};
 type Customer={customer_id:string,customer_name:string};
 type Invoice={invoice_id:string,invoice_no:string,currency:string,outstanding:number};
-const allowed=async(id:unknown)=>{if(!val(id))return false;const {data,error}=await db().from("bb_telegram_assistant_admins").select("telegram_user_id").eq("telegram_user_id",val(id)).maybeSingle();return !error&&!!data;};
+const allowed=async(id:unknown)=>{if(!val(id))return false;const {data,error}=await db().from("bb_telegram_assistant_admins").select("telegram_user_id").eq("telegram_user_id",val(id)).limit(1);return !error&&!!data?.length;};
 type RouteScope={location_code:string|null,access_mode:"legacy"|"staff_location"|"admin_only"};
 async function bankScope(m:any):Promise<RouteScope|null>{
  if(!m?.chat?.id)return null;
