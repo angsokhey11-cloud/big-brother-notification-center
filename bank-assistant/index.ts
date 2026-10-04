@@ -137,40 +137,77 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
+
  const {data:identityRows,error:identityError}=await client.rpc("bb_bank_identity_customer_ids_by_name",{p_name:notice.sender});
  if(identityError)throw identityError;
  const ids=(identityRows||[]).map((x:any)=>x.customer_id).filter(Boolean).slice(0,8);
+
  if(!ids.length)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
+
  let peopleQuery=client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(scope.location_code)peopleQuery=peopleQuery.eq("location_code",scope.location_code);
- const {data:people,error:peopleErr}=await peopleQuery;
- if(peopleErr)throw peopleErr;
- if(!people?.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។");
+
+ const invoicesQuery=client.from("invoices")
+   .select("invoice_id,invoice_no,customer_id,currency,outstanding,invoice_date")
+   .in("customer_id",ids)
+   .gt("outstanding",0)
+   .order("invoice_date",{ascending:true})
+   .limit(280);
+
+ const duplicatePromise=notice.transactionId
+   ? Promise.all([
+      client.from("payments").select("payment_id").ilike("transaction_id",notice.transactionId).limit(1),
+      client.from("bb_verified_bank_transactions").select("status").ilike("transaction_id",notice.transactionId).limit(1),
+      client.from("company_deposits").select("deposit_id").ilike("collection_transaction_id",notice.transactionId).limit(1),
+      client.from("bb_cancelled_bank_transaction_ids").select("transaction_id").ilike("transaction_id",notice.transactionId).limit(1)
+     ]).then(([pay,reg,dep,cancelled])=>!!(pay.data?.length||reg.data?.length||dep.data?.length||cancelled.data?.length))
+   : Promise.resolve(false);
+
+ const [peopleResult,invoicesResult,isDuplicate]=await Promise.all([
+   peopleQuery,
+   invoicesQuery,
+   duplicatePromise
+ ]);
+
+ if(peopleResult.error)throw peopleResult.error;
+ if(invoicesResult.error)throw invoicesResult.error;
+
+ const people=(peopleResult.data||[]) as Customer[];
+ if(!people.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។");
+
+ const invoiceRows=(invoicesResult.data||[]) as (Invoice&{customer_id:string,invoice_date?:string})[];
+ const invoiceByCustomer=new Map<string,Invoice[]>();
+ for(const row of invoiceRows){
+   const list=invoiceByCustomer.get(row.customer_id)||[];
+   if(list.length<35)list.push(row);
+   invoiceByCustomer.set(row.customer_id,list);
+ }
+
  let head=people.length>1?"⚠️ <b>ឈ្មោះអ្នកផ្ទេរនេះត្រូវនឹងអតិថិជនច្រើននាក់</b>":"✅ <b>រកឃើញអតិថិជនដែលអាចត្រូវនឹងឈ្មោះនេះ</b>";
  head+=noticeDetails(notice);
- if(notice.transactionId){
-  const [pay,reg,dep,cancelled]=await Promise.all([
-    client.from("payments").select("payment_id").ilike("transaction_id",notice.transactionId).limit(1),
-    client.from("bb_verified_bank_transactions").select("status").ilike("transaction_id",notice.transactionId).limit(1),
-    client.from("company_deposits").select("deposit_id").ilike("collection_transaction_id",notice.transactionId).limit(1),
-    client.from("bb_cancelled_bank_transaction_ids").select("transaction_id").ilike("transaction_id",notice.transactionId).limit(1)
-  ]);
-  if(pay.data?.length||reg.data?.length||dep.data?.length||cancelled.data?.length)head+="\n⚠️ <b>លេខប្រតិបត្តិការនេះមានក្នុងប្រវត្តិទូទាត់ ឬបញ្ជីធនាគាររួចហើយ។ សូមពិនិត្យមុនបន្ត។</b>";
- }
- for(const c of (people||[]) as Customer[]){
+
+ if(isDuplicate)head+="\n⚠️ <b>លេខប្រតិបត្តិការនេះមានក្នុងប្រវត្តិទូទាត់ ឬបញ្ជីធនាគាររួចហើយ។ សូមពិនិត្យមុនបន្ត។</b>";
+
+ for(const c of people){
   head+="\n\n👤 <b>"+escape(c.customer_name)+"</b> ("+escape(c.customer_id)+")\nផ្គូផ្គងតាមឈ្មោះអ្នកផ្ទេរ";
-  const {data:open,error:openError}=await client.from("invoices").select("invoice_id,invoice_no,currency,outstanding").eq("customer_id",c.customer_id).gt("outstanding",0).order("invoice_date",{ascending:true}).limit(35);
-  if(openError){head+="\nមិនអាចទាញយកទិន្នន័យបំណុលបាននៅពេលនេះ។";continue;}
-  const rows=(open||[]) as Invoice[];
+  const rows=invoiceByCustomer.get(c.customer_id)||[];
   if(!rows.length){head+="\nមិនមានវិក្កយបត្រជំពាក់។ អាចជាការទូទាត់វិក្កយបត្រថ្មី ឬប្រតិបត្តិការផ្សេង។";continue;}
   head+="\nវិក្កយបត្រមិនទាន់ទូទាត់៖ "+rows.length;
   if(notice.currency&&notice.amount!==null&&notice.amount>0){
    const matches=combos(rows,notice.amount,notice.currency);
-   if(matches.length){head+="\n<b>វិក្កយបត្រជំពាក់ដែលអាចត្រូវនឹងចំនួនទឹកប្រាក់៖</b>";
-    for(const group of matches){head+="\n• "+group.map(x=>escape(x.invoice_no)+" ("+escape(x.currency)+" "+escape(x.outstanding)+")").join(" + ");}
-   }else head+="\nរកមិនឃើញវិក្កយបត្រជំពាក់ដែលមានរូបិយប័ណ្ណ និងចំនួនទឹកប្រាក់ត្រូវគ្នាទាំងស្រុងទេ។ អាចជាការបង់មួយផ្នែក ការបង់ឆ្លងរូបិយប័ណ្ណ វិក្កយបត្រថ្មី ឬប្រតិបត្តិការផ្សេង។";
-  }else head+="\nមិនទាន់មានចំនួនទឹកប្រាក់ ឬរូបិយប័ណ្ណច្បាស់លាស់ ដូច្នេះមិនទាន់ផ្គូផ្គងវិក្កយបត្រទេ។";
+   if(matches.length){
+    head+="\n<b>វិក្កយបត្រជំពាក់ដែលអាចត្រូវនឹងចំនួនទឹកប្រាក់៖</b>";
+    for(const group of matches){
+      head+="\n• "+group.map(x=>escape(x.invoice_no)+" ("+escape(x.currency)+" "+escape(x.outstanding)+")").join(" + ");
+    }
+   }else{
+    head+="\nរកមិនឃើញវិក្កយបត្រជំពាក់ដែលមានរូបិយប័ណ្ណ និងចំនួនទឹកប្រាក់ត្រូវគ្នាទាំងស្រុងទេ។ អាចជាការបង់មួយផ្នែក ការបង់ឆ្លងរូបិយប័ណ្ណ វិក្កយបត្រថ្មី ឬប្រតិបត្តិការផ្សេង។";
+   }
+  }else{
+   head+="\nមិនទាន់មានចំនួនទឹកប្រាក់ ឬរូបិយប័ណ្ណច្បាស់លាស់ ដូច្នេះមិនទាន់ផ្គូផ្គងវិក្កយបត្រទេ។";
+  }
  }
+
  head+="\n\n<i>នេះគ្រាន់តែជាការសម្គាល់ និងការណែនាំប៉ុណ្ណោះ។ គ្មានការកែប្រែការទូទាត់ ឬវិក្កយបត្រឡើយ។</i>";
  return reply(m,head);
 }
