@@ -137,17 +137,10 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
- const {data:bankRows,error:bankError}=await client.from("bb_customer_bank_identities").select("identity_id,customer_id,bank_name,account_holder_name,account_number,alternative_names,active").eq("active",true).limit(2000);
- if(bankError)throw bankError;
- const nSender=norm(notice.sender);
- const candidates=new Set<string>();
- for(const b of (bankRows||[]) as Bank[]){
-  // Match the actual sender NAME across all banks and accounts.
-  // If multiple customers share this name, keep all candidates for review.
-  if([b.account_holder_name,...(b.alternative_names||[])].some(name=>norm(name)===nSender))candidates.add(b.customer_id);
- }
- if(!candidates.size)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
- const ids=[...candidates].slice(0,8);
+ const {data:identityRows,error:identityError}=await client.rpc("bb_bank_identity_customer_ids_by_name",{p_name:notice.sender});
+ if(identityError)throw identityError;
+ const ids=(identityRows||[]).map((x:any)=>x.customer_id).filter(Boolean).slice(0,8);
+ if(!ids.length)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
  let peopleQuery=client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(scope.location_code)peopleQuery=peopleQuery.eq("location_code",scope.location_code);
  const {data:people,error:peopleErr}=await peopleQuery;
@@ -326,8 +319,14 @@ async function enqueueNotice(updateId:number,m:any){
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function drainTopicQueue(chat:string,thread:number){
  const owner=crypto.randomUUID(),client=db();
- const {data:locked,error:lockError}=await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:120});
- if(lockError||locked!==true)return;
+ let acquired=false;
+ for(let waitAttempt=0;waitAttempt<90;waitAttempt++){
+  const {data:locked,error:lockError}=await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45});
+  if(lockError)throw lockError;
+  if(locked===true){acquired=true;break;}
+  await sleep(1000);
+ }
+ if(!acquired)return;
  try{
   for(let processed=0;processed<40;processed++){
    const {data:row,error}=await client.from("bb_bank_assistant_queue")
@@ -353,7 +352,7 @@ async function drainTopicQueue(chat:string,thread:number){
       continue;
     }
    }
-   await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:120});
+   await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45});
    const {count}=await client.from("bb_bank_assistant_queue").select("queue_id",{count:"exact",head:true})
      .eq("telegram_chat_id",chat).eq("telegram_thread_id",thread);
    if((count||0)>0)await sleep(3200);
