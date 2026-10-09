@@ -43,16 +43,26 @@ async function tg(method:string,body:Record<string,unknown>){const r=await fetch
 let commandsReady=false;
 async function ensureTelegramCommands(){
  if(commandsReady)return;
- const result=await tg("setMyCommands",{
-  commands:[
+ // Telegram keeps separate slash-command menus for 1:1 chats and groups.
+ // Preserve the existing Bank Assistant menu and register a private organizer menu.
+ const definitions=[
+  {scope:{type:"all_group_chats"},commands:[
    {command:"help",description:"Show supported bank notice formats"},
    {command:"bankhelp",description:"Show Bank Assistant help"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
    {command:"myid",description:"Show your Telegram user ID"}
-  ],
-  scope:{type:"all_group_chats"}
- });
- if(result?.ok)commandsReady=true;
+  ]},
+  {scope:{type:"all_private_chats"},commands:[
+   {command:"start",description:"Welcome and show your Telegram ID"},
+   {command:"help",description:"Show the private bot command menu"},
+   {command:"myid",description:"Show your Telegram User ID"},
+   {command:"photo",description:"Check Invoice Photo Organizer mapping"},
+   {command:"phototest",description:"Test group and private message delivery"}
+  ]}
+ ];
+ const results=await Promise.all(definitions.map(d=>tg("setMyCommands",d)));
+ if(results.some(x=>x?.ok!==true))throw Error("Telegram rejected command registration");
+ commandsReady=true;
 }
 async function reply(m:any,html:string,extra:Record<string,unknown>={}){
  const destination:Record<string,unknown>={chat_id:m.chat.id,reply_to_message_id:m.message_id,text:html.slice(0,3900),parse_mode:"HTML",disable_web_page_preview:true,...extra};
@@ -457,12 +467,25 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  const myid=/^\/myid(?:@\w+)?$/i.test(t)||/^(?:id|my id)$/i.test(t);
  const status=/^(?:\/(?:photo|photostatus)(?:@\w+)?|photo|photo status|organizer)$/i.test(t);
  const test=/^(?:\/phototest(?:@\w+)?|photo test)$/i.test(t);
- if(!start&&!myid&&!status&&!test)return false;
+ const help=/^\/help(?:@\w+)?$/i.test(t);
+ if(!start&&!myid&&!status&&!test&&!help)return false;
+ if(help){
+   await reply(m,
+     "🤖 <b>BIG BROTHER — Private Bot Commands</b>\n\n"+
+     "👋 <code>/start</code> — Welcome and show my User ID\n"+
+     "🪪 <code>/myid</code> — Show my Telegram User ID\n"+
+     "📸 <code>/photo</code> — Check private reviewer and output mappings\n"+
+     "🧪 <code>/phototest</code> — Send harmless tests to mapped destinations\n"+
+     "❓ <code>/help</code> — Show this list\n\n"+
+     "Note: Photo mapping and delivery tests require authorized admin access. Invoice processing is not active yet."
+   );
+   return true;
+ }
  if(start||myid){
    const message=(start?"👋 <b>Welcome to BIG BROTHER Bot!</b>\n\n":"")
      +"🪪 <b>Your Telegram User ID</b>\n<code>"+escape(id)+"</code>\n\n"
-     +"To check your private invoice-review mapping, send <code>/photo</code>, <code>PHOTO</code>, or <code>/photostatus</code>.\n"
-     +"To test your mapped delivery destinations, send <code>/phototest</code>.\n\n"
+     +"Tap <code>/</code> beside the message box for available commands, or send <code>/help</code>.\n"
+     +"Use <code>/photo</code> to check mapping and <code>/phototest</code> to test delivery.\n\n"
      +"📸 Invoice forwarding, photo review and album delivery are not yet active.";
    await reply(m,message);
    return true;
