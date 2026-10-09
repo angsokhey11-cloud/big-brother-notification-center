@@ -185,6 +185,7 @@ el("approve").onclick=async()=>{
  const retry=batch.status==="failed";
  if(!retry&&!confirm("Approve ALL "+items.length+" reviewed invoices and send them to the mapped group/topic and your private chat?"))return;
  busy=true;el("approve").disabled=true;el("approve").textContent="Sending albums…";clearStatus();
+ let deliveryError="";
  try{
   const out=await call(retry?"retry":"approve",{batch_id:batch.batch_id});
   if(!out.completed)throw Error("Delivery incomplete. Reopen review for details.");
@@ -204,13 +205,14 @@ el("approve").onclick=async()=>{
     }
    }
   }catch(_){}
-  status(errorMessage,true);
+  deliveryError=errorMessage;
  }
  finally{
   busy=false;
   if(!el("summary").classList.contains("hide")){
     showSummary();
   }
+  if(deliveryError)status(deliveryError,true);
  }
 };
 el("demo").onclick=()=>{
