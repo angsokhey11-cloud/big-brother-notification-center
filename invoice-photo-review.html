@@ -126,12 +126,22 @@ async function saveCurrent(){
  }else Object.assign(item,{invoice_no:n,invoice_date:d,review_state:"confirmed"});
 }
 async function move(next){
- if(busy)return;busy=true;
- try{if(el("form").reportValidity())await saveCurrent();else return;
-   if(next==="summary")showSummary();else{index=Math.max(0,Math.min(items.length-1,index+Number(next)));await render()}
+ if(busy)return;
+ busy=true;
+ let readyToSummarize=false;
+ try{
+  if(!el("form").reportValidity())return;
+  await saveCurrent();
+  if(next==="summary")readyToSummarize=true;
+  else{
+   index=Math.max(0,Math.min(items.length-1,index+Number(next)));
+   await render();
+  }
  }catch(e){status(e.message,true)}
  finally{
+  // Always unlock controls BEFORE computing final summary button eligibility.
   busy=false;
+  if(readyToSummarize)showSummary();
   if(!el("review").classList.contains("hide")){
    el("prev").disabled=index===0;
    el("next").disabled=!preview&&batch?.status!=="awaiting_review";
@@ -181,8 +191,27 @@ el("approve").onclick=async()=>{
   section("empty");el("mode").textContent="Delivered";el("empty").querySelector("h2").textContent="✅ All invoice albums delivered";
   el("emptyText").textContent="Your sorted photos were sent to both mapped destinations. Temporary review data was cleared. The bot also sent you a confirmation.";
   el("demo").classList.add("hide");batch=null;items=[];
- }catch(e){if(batch){batch.status="failed";showSummary()}status(e.message,true)}
- finally{busy=false}
+ }catch(e){
+  // A transport or validation error does NOT mean Telegram delivery failed.
+  // Reload the authoritative server status before offering any retry.
+  const errorMessage=e instanceof Error?e.message:String(e);
+  try{
+   if(batch&&!preview){
+    const refreshed=await call("load",{batch_id:batch.batch_id});
+    if(refreshed.batch){
+     batch=refreshed.batch;
+     if(Array.isArray(refreshed.items))items=refreshed.items;
+    }
+   }
+  }catch(_){}
+  status(errorMessage,true);
+ }
+ finally{
+  busy=false;
+  if(!el("summary").classList.contains("hide")){
+    showSummary();
+  }
+ }
 };
 el("demo").onclick=()=>{
  preview=true;batch={status:"awaiting_review"};items=[
