@@ -6,6 +6,17 @@ Private route `ANG SOKKHEY` is enabled and has two active mapped outputs: one gr
 
 **Not finished:** Non-AI automatic paper-edge crop, perspective straightening, and image contrast enhancement. These should be tested separately; until then the original Telegram photo is delivered unchanged rather than risking invoice damage. Bot help texts on GitHub were updated after live webhook v36 but that text-only update may not be deployed yet. Verify the deployed versions before syncing.
 
+## Reviewer speed and range reports — 09-Oct-2026
+
+- **Sticky invoice date:** When the reviewer selects an invoice date, later unreviewed pictures automatically default to that date until they change it. Dates already confirmed on prior photos are never overwritten. The form still requires explicit `Save & Next` for each picture. When returning to an unfinished batch, the last confirmed date is reused.
+- **Review summary by date and invoice-number ranges:** The Mini App shows total confirmed photo count per invoice date (DD-Mon-YYYY), each separate invoice number run on that date, the count of reviewed photos within that run, and the range difference `end - start`.
+- **Auto split:** A consecutive numeric gap **greater than 20** starts another range, even within the same date. This separates e.g. 2220–2233 and 3300–3325 into two separate date/range entries.
+- **Skip positions:** Missing serials *within* a range are expressed as offsets from its first invoice, padded to two digits (`2225` inside `2220–2233` = `05`; `3312` inside `3300–3325` = `12`). This matches the shorthand specified by the user. Counts are actual reviewed photos; duplicate invoice numbers are not falsely collapsed. Skip positions inferred only between confirmed endpoints, and should not be confused with paper-book cancellation evidence.
+- **Important mathematical clarity:** `2220–2233 = 13` is a difference of 13, but 14 *inclusive* serial positions; three skipped numbers means 11 present invoices, not 10. `3300–3325 = 25` is a difference of 25, 26 inclusive; five skips means 21 present invoices, not 20. The software keeps the user's range-difference convention and reports the actual reviewer-confirmed count.
+- **Private delivery confirmation:** After all mapped group/private albums succeed, `bb-invoice-photo-review` v7 sends this date/range summary privately to the reviewer (chunked for Telegram length limits) before deleting the temporary batch. No range summary is exposed in the outgoing staff group.
+- Mini App static page updated. Both the private /review bot button (`bb-bank-assistant` v38) and the idle-finalizer review button (`bb-invoice-photo-finalizer` v3) use a refreshed query-string URL to bypass Telegram WebView caching.
+- Verified with two date-07-Oct-2026 test ranges and a separate date retaining leading zeroes: split, arithmetic, skip offsets and sorting tests passed. Live Telegram report display is pending the next user-reviewed photo batch.
+
 ## User-approved workflow
 1. Reviewer forwards selected invoice photos privately to BIG BROTHER Bot. Only messages with Telegram forward origin and a photo, from the configured authorized private reviewer chat, are accepted.
 2. Bot stores temporary photo references and groups incoming forwards. New pictures do not cause any delivery to groups.
