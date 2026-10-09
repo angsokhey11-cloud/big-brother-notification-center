@@ -184,40 +184,11 @@ async function newInvoiceRegisterPrompt(m:any,notice:ReturnType<typeof parseNoti
  if(error)console.warn("Bank notice review metadata capture failed",error.code||"db");
  return {};
 }
-async function newInvoiceRegisterClick(cb:any,scope:RouteScope){
- const data=val(cb.data),match=data.match(/^bbnew:([0-9a-f-]{36})$/i);
- if(!match)return false;
- const id=val(cb.from?.id);
- if(!await allowed(id)){
-  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Only authorized BIG BROTHER admins may review new-invoice bank registrations.",show_alert:true});
-  return true;
- }
- const source=cb.message;
- if(!source?.chat?.id){await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Bank notice no longer available.",show_alert:true});return true;}
- const {data:claimed,error}=await db().rpc("bb_bank_new_invoice_claim",{
-  p_draft_id:match[1],p_user:id,p_chat:val(source.chat.id),p_thread:Number(source.message_thread_id||0)
- });
- if(error||claimed!==true){
-  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"This bank notice was already claimed or expired. Do not register it again.",show_alert:true});
-  return true;
- }
- const webUrl="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-new-invoice-review.html?draft="+encodeURIComponent(match[1]);
- try{
-  const sent=await tg("sendMessage",{chat_id:id,text:
-   "🏦 <b>BIG BROTHER — New Invoice Bank Register</b>\n\n"+
-   "Open the private review. Confirm the customer, transaction, and payer. If that customer has no saved payer, choose <b>Add Bank Payer</b> to save it to the Customer Bank Directory first.\n\n"+
-   "⚠️ Only for a <b>NEW Invoice Generator invoice</b>. Do not register an A/R or unrelated transfer.\n"+
-   "No bank transaction or invoice has been changed.",
-   parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📋 Review New Invoice Bank Register",web_app:{url:webUrl}}]]}});
-  if(sent?.ok===false)throw Error("Cannot send reviewer message");
-  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Private registration review sent. No bank registration has been created."});
- }catch(_){
-  await tg("answerCallbackQuery",{callback_query_id:cb.id,
-    text:"Please start BIG BROTHER Bot in your private chat, then tap this button again.",show_alert:true});
- }
+async function newInvoiceRegisterClick(cb:any,_scope:RouteScope){
+ if(!/^bbnew:/i.test(val(cb.data)))return false;
+ await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Send /reviewtransaction in your Bank Assistant topic to get a private review batch.",show_alert:true});
  return true;
 }
-
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
