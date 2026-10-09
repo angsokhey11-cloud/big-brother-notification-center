@@ -79,7 +79,7 @@ async function reply(m:any,html:string,extra:Record<string,unknown>={}){
 // groups not configured yet in Telegram Manager. No finance or membership data used.
 async function replyGroupAndTopicIds(m:any):Promise<boolean>{
  const command=val(m?.text);
- if(!/^\\/(?:groupid|topicid|chatid)(?:@\\w+)?$/i.test(command))return false;
+ if(!/^\/(?:groupid|topicid|chatid)(?:@\w+)?$/i.test(command))return false;
  if(m?.from?.is_bot)return true;
  const type=val(m?.chat?.type);
  if(type!=="group"&&type!=="supergroup"){
@@ -89,12 +89,12 @@ async function replyGroupAndTopicIds(m:any):Promise<boolean>{
  const chatId=val(m.chat.id),rawTopic=Number(m.message_thread_id||0);
  const topic=Number.isSafeInteger(rawTopic)&&rawTopic>0?rawTopic:0;
  const name=val(m.chat.title);
- const title=name?"\\nGroup: <b>"+escape(name)+"</b>":"";
+ const title=name?"\nGroup: <b>"+escape(name)+"</b>":"";
  const answer="🏦 <b>BIG BROTHER — Telegram Routing IDs</b>"+title+
-  "\\n\\n📍 <b>Group ID</b>\\n<code>"+escape(chatId)+"</code>"+
-  "\\n\\n🧵 <b>Topic ID</b>\\n<code>"+topic+"</code>"+
-  (topic===0?"\\n<i>0 means this message has no separate topic ID (general group/chat).</i>":"")+
-  "\\n\\nCopy these values into Telegram Manager → Bank Assistant / Personal Review Routes.";
+  "\n\n📍 <b>Group ID</b>\n<code>"+escape(chatId)+"</code>"+
+  "\n\n🧵 <b>Topic ID</b>\n<code>"+topic+"</code>"+
+  (topic===0?"\n<i>0 means this message has no separate topic ID (general group/chat).</i>":"")+
+  "\n\nCopy these values into Telegram Manager → Bank Assistant / Personal Review Routes.";
  await reply(m,answer);
  return true;
 }
