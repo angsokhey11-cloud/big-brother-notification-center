@@ -58,7 +58,9 @@ async function ensureTelegramCommands(){
    {command:"myid",description:"Show your Telegram User ID"},
    {command:"photo",description:"Check Invoice Photo Organizer mapping"},
    {command:"phototest",description:"Test group and private message delivery"},
-   {command:"review",description:"Open picture review with date and number boxes"}
+   {command:"review",description:"Open picture review with date and number boxes"},
+   {command:"done",description:"Finish forwarding pictures and open review"},
+   {command:"cancel",description:"Discard the pending forwarded-photo batch"}
   ]}
  ];
  const results=await Promise.all(definitions.map(d=>tg("setMyCommands",d)));
@@ -479,6 +481,8 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      "📸 <code>/photo</code> — Check private reviewer and output mappings\n"+
      "🧪 <code>/phototest</code> — Send harmless tests to mapped destinations\n"+
      "📋 <code>/review</code> — Open photo review with two input boxes\n"+
+     "✅ <code>/done</code> — Finish collecting forwarded photos\n"+
+     "🗑 <code>/cancel</code> — Discard an unfinished batch\n"+
      "❓ <code>/help</code> — Show this list\n\n"+
      "Note: Photo mapping and delivery tests require authorized admin access. Invoice processing is not active yet."
    );
@@ -502,7 +506,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
    await reply(m,
      "📸 <b>BIG BROTHER — Invoice Review</b>\n\n"+
      "Tap below to open the one-photo review screen with <b>Invoice Date</b> and <b>Invoice Number</b> boxes, plus <b>Save &amp; Next</b>.\n\n"+
-     "⚠️ No live forwarded-photo collection or album delivery yet. The Mini App includes a harmless layout preview.",
+     "If you have already forwarded your chosen photos, tap below to review them. If no batch is pending, the Mini App offers a harmless layout preview.",
      {reply_markup:{inline_keyboard:[[{text:"📸 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html"}}]]}}
    );
    return true;
@@ -569,6 +573,62 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  await reply(m,lines.join("\n"));
  return true;
 }
+// The photo organizer listens ONLY to forwarded photos in the explicitly mapped private chat.
+// Groups remain outgoing destinations, never scanned or queued.
+async function invoicePhotoPrivate(m:any):Promise<boolean>{
+ if(val(m?.chat?.type)!=="private"||m.from?.is_bot===true||val(m.chat?.id)!==val(m.from?.id))return false;
+ const user=val(m.from?.id),txt=val(m.text);
+ const cmdDone=/^\/done(?:@\w+)?$/i.test(txt);
+ const cmdCancel=/^\/cancel(?:@\w+)?$/i.test(txt);
+ const forwardedPicture=Array.isArray(m.photo)&&m.photo.length>0&&!!(m.forward_origin||m.forward_date);
+ if(!cmdDone&&!cmdCancel&&!forwardedPicture)return false;
+ if(!await allowed(user))return false;
+ const client=db();
+ const {data:route,error}=await client.from("bb_invoice_photo_routes").select("route_id,route_label").eq("source_chat_id",user)
+   .eq("reviewer_telegram_user_id",user).eq("source_thread_id",0).eq("active",true)
+   .eq("intake_mode","private_forward_only").eq("review_mode","manual_all").maybeSingle();
+ if(error)throw error;
+ if(!route){
+   await reply(m,"📸 Invoice Photo Organizer intake is not enabled yet. Check your private reviewer mapping in Telegram Manager.");
+   return true;
+ }
+ if(forwardedPicture){
+   const photo=m.photo[m.photo.length-1];
+   const {data,error:err}=await client.rpc("bb_invoice_photo_receive",{
+      p_reviewer:user,p_message_id:Number(m.message_id),p_file_id:val(photo.file_id),p_file_unique_id:val(photo.file_unique_id)||null
+   });
+   if(err)throw err;
+   if(data?.first&&!data?.duplicate)await reply(m,"📥 <b>Invoice pictures received privately.</b>\nForward the rest of your chosen invoice pictures here.\nTap <code>/done</code> when finished, or wait for the automatic review task.\nNo photos have been sent to any group.");
+   return true;
+ }
+ if(cmdCancel){
+   const {data:rows,error:e}=await client.from("bb_invoice_photo_review_batches").select("batch_id,status")
+    .eq("reviewer_telegram_user_id",user).eq("route_id",route.route_id).in("status",["collecting","awaiting_review"]).limit(10);
+   if(e)throw e;
+   for(const row of rows||[]){
+    const {error:d}=await client.from("bb_invoice_photo_review_batches").delete().eq("batch_id",row.batch_id)
+       .in("status",["collecting","awaiting_review"]);
+    if(d)throw d;
+   }
+   await reply(m,"🗑 Temporary invoice photo review "+(rows?.length?"batch discarded.":"queue is already empty.")+"\nNo pictures were posted to your group.");
+   return true;
+ }
+ if(cmdDone){
+   const {data,error:e}=await client.rpc("bb_invoice_photo_close",{p_reviewer:user});
+   if(e)throw e;
+   if(!data?.ok){
+     await reply(m,"📸 "+escape(val(data?.reason)||"No forwarded invoice photos to review."));
+     return true;
+   }
+   const {error:markError}=await client.from("bb_invoice_photo_review_batches").update({review_notice_sent_at:new Date().toISOString()}).eq("batch_id",data.batch_id);
+   if(markError)throw markError;
+   await reply(m,"✅ <b>"+Number(data.count)+" invoice pictures ready for review</b>\nTap below, check both boxes for every invoice, then approve sending to your mapped destinations.",
+     {reply_markup:{inline_keyboard:[[{text:"📋 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html"}}]]}});
+   return true;
+ }
+ return false;
+}
+
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
@@ -649,6 +709,7 @@ Deno.serve(async(req:Request)=>{
   if(m){
     // Reply privately and stop; mapped group Bank Assistant handling remains untouched.
     if(await replyToPrivateIdentity(m))return Response.json({ok:true});
+    if(await invoicePhotoPrivate(m))return Response.json({ok:true});
     const scope=await bankScope(m);
     if(scope){
       if(await scopeAllows(m,scope)){
