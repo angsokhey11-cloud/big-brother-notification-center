@@ -247,7 +247,7 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
   return;
  }
  const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-batch-review.html?batch="+
-  encodeURIComponent(batch)+"&v=staged-versus-registered-20261010";
+  encodeURIComponent(batch)+"&v=customer-location-20261010";
  try{
   const sent=await tg("sendMessage",{
     chat_id:reviewer,
