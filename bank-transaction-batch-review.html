@@ -24,6 +24,11 @@ button:disabled{opacity:.46;cursor:not-allowed}.wide{width:100%;margin-top:14px}
 .purpose{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:12px 0}
 .purpose button.active{background:#63cda8;color:#05291e}
 .purpose button{font-size:13px;background:#243e58;color:#eaf4ff}
+.customer-suggestions{border:1px solid #47769b;border-radius:11px;background:#0d273f;margin:6px 0 12px;padding:5px;max-height:260px;overflow-y:auto;overscroll-behavior:contain}
+.customer-suggestions button{display:block;width:100%;text-align:left;border-radius:8px;background:transparent;color:#ecf6ff;min-height:48px;margin:0;padding:10px 12px;font-weight:550}
+.customer-suggestions button+button{border-top:1px solid #294660}
+.customer-suggestions button:focus,.customer-suggestions button:active{background:#284c6b;outline:2px solid #69c6ff}
+.customer-suggestions .result-note{color:#a9bfd4;padding:9px 12px;font-size:12px}
 .summaryrow{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid #2c4862}
 .summaryrow .info{overflow-wrap:anywhere}.small{font-size:12px;color:#adbed3}
 dialog{background:#132b46;color:#eef8ff;border:1px solid #4e708d;border-radius:15px;width:min(95vw,570px);max-height:87vh;overflow:auto}
@@ -52,7 +57,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <p class="small" id="purposeHint">Choose whether to register this for a new Invoice Generator sale.</p>
 <form id="detailsForm">
 <div id="newDetails" class="hide">
- <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Customer name or ID">
+ <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Type name or customer ID to see matches…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
  <label for="customer">Customer</label><select id="customer"><option value="">Select customer</option></select>
  <div class="small" id="customerHint"></div>
  <label for="payer">Bank Payer from Customer Directory</label><select id="payer"><option value="">Select payer</option></select>
@@ -128,12 +133,45 @@ async function rpc(name,args={}){let jwt=await token();const request=t=>fetch(en
 async function call(action,args={}){const res=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,batch_id:batchId,init_data:initData,session_jwt:await token(),...args})});return decode(res)}
 async function signIn(email,password){const res=await fetch(endpoint+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:key,"content-type":"application/json"},body:JSON.stringify({email,password})});putSession(await decode(res))}
 function lock(value){busy=value;for(const id of ["next","previous","approve","addPayer","saveBank","jumpSummary"]){el(id).disabled=value}}
-function pickCustomerOptions(){const keyword=norm(el("customerSearch").value),previous=el("customer").value;
+function pickCustomerOptions(){
+ const previous=el("customer").value;
  el("customer").replaceChildren(new Option("Select customer",""));
- for(const c of customers){const label=clean(c.customer_name||c.customer_id)+" — "+c.customer_id;
-  if(keyword&&!norm(label).includes(keyword)&&c.customer_id!==previous)continue;
-  el("customer").add(new Option(label,c.customer_id))}
+ for(const c of customers){
+  el("customer").add(new Option(clean(c.customer_name||c.customer_id)+" — "+c.customer_id,c.customer_id));
+ }
  if(customers.some(c=>c.customer_id===previous))el("customer").value=previous;
+}
+function hideCustomerSuggestions(){
+ el("customerSuggestions").replaceChildren();
+ el("customerSuggestions").classList.add("hide");
+}
+function selectCustomer(c){
+ if(!c||!customers.some(row=>row.customer_id===c.customer_id))return;
+ el("customer").value=c.customer_id;
+ el("customerSearch").value="";
+ hideCustomerSuggestions();
+ populatePayers();
+ el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · Selected for this transaction";
+ el("customerSearch").blur();
+}
+function showCustomerSuggestions(){
+ const term=norm(el("customerSearch").value),panel=el("customerSuggestions");
+ panel.replaceChildren();
+ if(!term){panel.classList.add("hide");return}
+ const matched=customers.filter(c=>norm(clean(c.customer_name||"")+" "+c.customer_id).includes(term));
+ const shown=matched.slice(0,12);
+ const info=document.createElement("div");
+ info.className="result-note";
+ info.textContent=matched.length?matched.length+" customer"+(matched.length===1?"":"s")+" found · Tap a customer to select":'No customers match "'+clean(el("customerSearch").value).slice(0,75)+'"';
+ panel.append(info);
+ for(const c of shown){
+  const button=document.createElement("button");
+  button.type="button";
+  button.textContent=clean(c.customer_name||c.customer_id)+" — "+c.customer_id;
+  button.onclick=()=>selectCustomer(c);
+  panel.append(button);
+ }
+ panel.classList.remove("hide");
 }
 function matchingCustomer(sender){const matches=new Set();
  for(const x of identities){if(!x.active)continue;const candidates=[x.account_holder_name,...(x.alternative_names||[])];
@@ -210,7 +248,7 @@ function render(){
  el("customerMatch").textContent=describeCustomerMatch(i,payload,suggested);
  el("original").textContent="Bank amount: "+money(i.amount)+" "+(i.currency||"")+"\nTransaction ID: "+(i.transaction_id||"Not supplied")+"\nSource message: "+i.source_message_id;
  choice=""; // Prevent previous transaction choices from triggering a payer popup on the next one.
- el("customerSearch").value="";pickCustomerOptions();
+ el("customerSearch").value="";hideCustomerSuggestions();pickCustomerOptions();
  const possible=payload.customer_id|| (suggested.length===1?suggested[0]:"");
  el("customer").value=possible;
  el("transaction").value=payload.transaction_id||i.transaction_id||"";
@@ -289,8 +327,23 @@ function openPayer(){
  el("accountNumber").value="";el("aliases").value="";
  el("bankPopup").showModal();
 }
-el("customerSearch").oninput=pickCustomerOptions;
-el("customer").onchange=populatePayers;
+el("customerSearch").oninput=showCustomerSuggestions;
+el("customerSearch").onkeydown=e=>{
+ if(e.key==="Escape"){hideCustomerSuggestions();return}
+ if(e.key==="ArrowDown"){
+  const first=el("customerSuggestions").querySelector("button");
+  if(first){e.preventDefault();first.focus()}
+ }else if(e.key==="Enter"){
+  const first=el("customerSuggestions").querySelector("button");
+  if(first){e.preventDefault();first.click()}
+ }
+};
+el("customer").onchange=()=>{
+ hideCustomerSuggestions();
+ populatePayers();
+ const c=customers.find(x=>x.customer_id===el("customer").value);
+ if(c)el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · Selected for this transaction";
+};
 el("payer").onchange=updatePayerRegistration;
 el("currency").onchange=setRate;el("invoiceCurrency").onchange=setRate;
 el("chooseNew").onclick=()=>setChoice("new_invoice");
