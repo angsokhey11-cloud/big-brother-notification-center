@@ -56,6 +56,7 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
    <input type="date" id="date" required>
    <label for="number">Invoice Number</label>
    <input id="number" type="text" inputmode="numeric" autocomplete="off" maxlength="16" pattern="[0-9]{1,16}" placeholder="e.g. 002351" required>
+   <p class="subtle" style="font-size:12px;margin:9px 0 0">⌨️ Use ↑ or ↓ to switch between Date and Invoice Number.</p>
    <div class="buttonrow"><button class="secondary" type="button" id="prev">← Previous</button><button class="primary" id="next" type="submit">Save &amp; Next →</button></div>
   </form>
  </div>
@@ -101,6 +102,8 @@ async function render(){
  el("bar").style.width=Math.round(completed()/items.length*100)+"%";
  el("date").value=i.invoice_date||"";
  el("number").value=i.invoice_no||"";
+ // Always start the new invoice on Date. Keep photo visible rather than scrolling to the field.
+ el("date").focus({preventScroll:true});
  el("prev").disabled=busy||index===0;
  el("next").textContent=index===items.length-1?"Save & Review Summary →":"Save & Next →";
  el("next").disabled=busy||(!preview&&batch?.status!=="awaiting_review");
@@ -176,6 +179,18 @@ function showSummary(){
   :isFailed?"Some albums did not reach their destinations. Already delivered albums are tracked separately. If the bot reports an uncertain send, contact admin before retrying."
   :ready?"After approval, the bot sends the original, unaltered invoice photos sorted by your confirmed date and number. Printed invoice details remain intact."
   :"Complete the date and number for EVERY picture before approving.";
+}
+// Physical keyboard navigation: ↑ and ↓ both toggle between the two review fields.
+// Prevent native date-field arrow keys from silently changing the selected date.
+for(const field of [el("date"),el("number")]){
+ field.addEventListener("keydown",e=>{
+  if(e.key!=="ArrowUp"&&e.key!=="ArrowDown")return;
+  e.preventDefault();
+  e.stopPropagation();
+  const target=field===el("date")?el("number"):el("date");
+  target.focus({preventScroll:true});
+  if(target===el("number"))target.select();
+ });
 }
 el("form").onsubmit=async(e)=>{e.preventDefault();await move(index===items.length-1?"summary":1)};
 el("prev").onclick=async()=>{if(busy||index===0)return;const n=el("number").value.trim(),d=el("date").value;if(n&&d){await move(-1)}else{index--;await render()}};
