@@ -86,9 +86,9 @@ Deno.serve(async(req:Request)=>{
     if(cancelError)return reply({error:cancelError.message||"Unable to cancel pending review."},409);
     if(!out?.ok||!out?.cancelled)return reply({error:"Review cancellation was not confirmed."},409);
     if(!out?.already_cancelled){
-     await telegramPrivate(reviewerId,"🚫 BIG BROTHER — BANK REVIEW CANCELLED\\n\\n"+
-      Number(out.discarded||0)+" pending bank notices discarded from review.\\n"+
-      "No bank transactions were registered or removed. Existing Bank Register and payments are unchanged.\\n\\n"+
+     await telegramPrivate(reviewerId,"🚫 BIG BROTHER — BANK REVIEW CANCELLED\n\n"+
+      Number(out.discarded||0)+" pending bank notices discarded from review.\n"+
+      "No bank transactions were registered or removed. Existing Bank Register and payments are unchanged.\n\n"+
       "Forward new bank notices to the mapped group/topic, then send /reviewtransaction to start a fresh review.").catch(()=>{});
     }
     return reply(out);
