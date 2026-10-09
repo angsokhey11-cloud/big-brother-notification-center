@@ -55,7 +55,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <button type="button" id="chooseIgnore">⏭ Leave Alone — A/R / Other</button>
 </div>
 <p class="small" id="purposeHint">Choose whether to register this for a new Invoice Generator sale.</p>
-<form id="detailsForm">
+<form id="detailsForm" novalidate>
 <div id="newDetails" class="hide">
  <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Type name or customer ID to see matches…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
  <label for="customer">Customer</label><select id="customer"><option value="">Select customer</option></select>
@@ -69,7 +69,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
   <div><label for="amount">Actual Bank Amount</label><input id="amount" type="number" step=".0001" min=".0001"></div>
   <div><label for="currency">Bank Currency</label><select id="currency"><option>USD</option><option>KHR</option></select></div>
   <div><label for="invoiceCurrency">New Invoice Currency</label><select id="invoiceCurrency"><option>USD</option><option>KHR</option></select></div>
-  <div id="rateArea" class="hide"><label for="rate">KHR per USD rate</label><input id="rate" type="number" step=".0001" min="1.000001"></div>
+  <div id="rateArea" class="hide"><label for="rate">KHR per USD rate</label><input id="rate" type="number" step="any" min="1" disabled></div>
  </div><label for="bankName">Receiving Bank (optional)</label><input id="bankName">
  <p class="small">Registration only creates AVAILABLE Bank Register entries. Invoice Generator will consume them separately.</p>
 </div>
@@ -77,6 +77,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
  <button class="secondary" id="previous" type="button">← Previous</button>
  <button id="next" type="submit">Save &amp; Next →</button>
 </div>
+<div id="saveFeedback" class="notice hide" role="status" aria-live="polite" style="margin-top:12px"></div>
 </form>
 <button class="secondary wide" type="button" id="jumpSummary">Review summary</button>
 </section>
@@ -235,10 +236,20 @@ function setChoice(value){choice=value;
   choice==="new_invoice"?"Confirm customer, payer, bank transaction and currency before saving.":
   "Select New Invoice or Leave Alone to continue.";
 }
-function setRate(){const other=el("currency").value!==el("invoiceCurrency").value;el("rateArea").classList.toggle("hide",!other);if(!other)el("rate").value="1"}
+function setRate(){
+ const different=el("currency").value!==el("invoiceCurrency").value;
+ const rate=el("rate");
+ el("rateArea").classList.toggle("hide",!different);
+ // A CSS-hidden input still participates in native form validity checks.
+ // Explicitly disable it for same-currency invoices.
+ rate.disabled=!different;
+ rate.required=different;
+ if(!different)rate.value="1";
+ else if(!rate.value||Number(rate.value)<=1)rate.value="";
+}
 function render(){
  if(!items.length){section("complete");el("completeText").textContent="No bank transactions in this batch.";return}
- section("review");clear();
+ section("review");clear();clearSaveFeedback();
  const i=current(),payload=i.review_payload||{},suggested=matchingCustomer(i.sender_name);
  el("mode").textContent=batch?.status==="processing"?"Finalizing":"Private review";
  el("counter").textContent="Transaction "+(index+1)+" of "+items.length;
@@ -285,11 +296,44 @@ async function save(){
  await call("save",{draft_id:i.draft_id,decision:choice,details:payload});
  Object.assign(i,{review_decision:choice,review_payload:payload});
 }
+function saveFeedback(message,failed=false){
+ const target=el("saveFeedback");
+ target.textContent=message;
+ target.className="notice"+(failed?" err":"");
+ target.classList.remove("hide");
+}
+function clearSaveFeedback(){
+ const target=el("saveFeedback");
+ target.textContent="";
+ target.classList.add("hide");
+}
 async function next(delta){
- if(busy)return;lock(true);
- try{await save();if(delta==="summary")summary();else{index=Math.min(items.length-1,Math.max(0,index+Number(delta)));render()}}
- catch(e){say(e.message,true)}
- finally{lock(false);if(!el("summary").classList.contains("hide"))summary()}
+ if(busy)return;
+ lock(true);
+ saveFeedback("Saving transaction review…");
+ let advanced=false;
+ try{
+  await save();
+  if(delta==="summary"){clearSaveFeedback();summary()}
+  else{
+   index=Math.min(items.length-1,Math.max(0,index+Number(delta)));
+   render();
+   advanced=true;
+  }
+ }catch(e){
+  const message=e instanceof Error?e.message:String(e);
+  saveFeedback("⚠️ Could not save: "+message,true);
+  say(message,true);
+  el("saveFeedback").scrollIntoView({behavior:"smooth",block:"center"});
+ }finally{
+  lock(false);
+  if(!el("summary").classList.contains("hide"))summary();
+  else {
+   el("previous").disabled=index===0||batch?.status!=="reviewing";
+   el("next").disabled=batch?.status!=="reviewing";
+   if(advanced)el("counter").scrollIntoView({behavior:"smooth",block:"start"});
+  }
+ }
 }
 function summary(){
  section("summary");el("mode").textContent="Summary";clear();
