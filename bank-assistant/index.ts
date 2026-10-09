@@ -484,7 +484,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      "✅ <code>/done</code> — Finish collecting forwarded photos\n"+
      "🗑 <code>/cancel</code> — Discard an unfinished batch\n"+
      "❓ <code>/help</code> — Show this list\n\n"+
-     "Note: Photo mapping and delivery tests require authorized admin access. Invoice processing is not active yet."
+     "Note: Private invoice intake works only when enabled in Telegram Manager. Original pictures are preserved; automatic crop and straighten are not connected yet."
    );
    return true;
  }
@@ -493,7 +493,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      +"🪪 <b>Your Telegram User ID</b>\n<code>"+escape(id)+"</code>\n\n"
      +"Tap <code>/</code> beside the message box for available commands, or send <code>/help</code>.\n"
      +"Use <code>/photo</code> to check mapping and <code>/phototest</code> to test delivery.\n\n"
-     +"📸 Invoice forwarding, photo review and album delivery are not yet active.";
+     +"📸 When enabled, forward chosen invoice pictures here, then use /done or wait for the automatic review task. The bot uses original, unaltered pictures for delivery.";
    await reply(m,message);
    return true;
  }
@@ -549,7 +549,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
        results.push("❌ "+escape(val(target.destination_label))+" — unable to deliver");
      }
    }
-   await reply(m,"📸 <b>Photo Organizer — Delivery Test</b>\n"+results.join("\n")+"\n\nAutomatic invoice collection, private review and corrected-photo albums remain disabled.");
+   await reply(m,"📸 <b>Photo Organizer — Delivery Test</b>\n"+results.join("\n")+"\n\nThis was a harmless routing test. Private photo review and original-image album delivery work only when intake is enabled in Telegram Manager.");
    return true;
  }
  const lines=[
@@ -560,7 +560,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
    "📝 Every invoice requires manual number + date approval",
    "📤 Group/topic destinations: "+groupOutputs.length,
    "📩 Your private output: "+(privateOutput?"✅ Mapped":"❌ Not mapped"),
-   "⚙️ Organizer engine: "+(route.active?"⚠️ Enabled":"⏳ Not active yet"),
+   "⚙️ Private intake: "+(route.active?"✅ Enabled (original-image delivery)":"⏸ Paused"),
    "",
    "<b>Output mappings</b>"
  ];
@@ -569,7 +569,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  }
  if(!activeOutputs.length)lines.push("No enabled destinations");
  lines.push("","Use <code>/phototest</code> to test delivery of a harmless message to mapped destinations.",
-   "⚠️ Actual invoice review/photo delivery is not built yet. Do not forward sensitive invoices for processing.");
+   "🧾 When enabled, forward selected invoice photos privately. Use /done or wait for an automatic review task. After checking each photo, approve delivery. The current mode sends the original images without automatic crop/deskew.");
  await reply(m,lines.join("\n"));
  return true;
 }
