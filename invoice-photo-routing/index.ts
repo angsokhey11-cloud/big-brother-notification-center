@@ -6,6 +6,7 @@ const send=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,header
 const chatOk=(v:string)=>/^-?[0-9]{5,20}$/.test(v);
 const validThread=(v:number)=>Number.isSafeInteger(v)&&v>=0;
 const validId=(v:number)=>Number.isSafeInteger(v)&&v>0;
+const validPrivateUser=(v:string)=>/^[0-9]{5,20}$/.test(v);
 const db=()=>createClient(Deno.env.get("SUPABASE_URL")||"",Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",{auth:{persistSession:false}});
 const tg=async(method:string,data:Record<string,unknown>)=>{
  const token=Deno.env.get("TELEGRAM_BOT_TOKEN");
@@ -42,11 +43,11 @@ Deno.serve(async(req:Request)=>{
   }
   if(action==="route_save"){
     const id=body.route_id==null||body.route_id===""?null:Number(body.route_id);
-    const label=clean(body.route_label),chat=clean(body.source_chat_id),thread=Number(body.source_thread_id||0),idle=Number(body.idle_seconds||60);
+    const label=clean(body.route_label),chat=clean(body.source_chat_id),thread=Number(body.source_thread_id||0),idle=Number(body.idle_seconds||60),reviewer=clean(body.reviewer_telegram_user_id);
     if(id!==null&&!validId(id))return send({error:"Invalid route ID"},400);
-    if(!label||label.length>120||!chatOk(chat)||!validThread(thread)||!Number.isSafeInteger(idle)||idle<15||idle>600)return send({error:"Invalid source mapping"},400);
+    if(!label||label.length>120||!chatOk(chat)||!validThread(thread)||!Number.isSafeInteger(idle)||idle<15||idle>600||!validPrivateUser(reviewer))return send({error:"Source mapping requires a valid private Telegram reviewer User ID (5–20 digits)."},400);
     // Save sources inactive until the separate image processor is installed and tested.
-    const payload={route_label:label,source_chat_id:chat,source_thread_id:thread,idle_seconds:idle,active:false,updated_at:new Date().toISOString(),updated_by:user.id};
+    const payload={route_label:label,source_chat_id:chat,source_thread_id:thread,idle_seconds:idle,reviewer_telegram_user_id:reviewer,active:false,updated_at:new Date().toISOString(),updated_by:user.id};
     const result=id===null
       ?await client.from("bb_invoice_photo_routes").insert(payload).select("route_id")
       :await client.from("bb_invoice_photo_routes").update(payload).eq("route_id",id).select("route_id");
@@ -59,6 +60,16 @@ Deno.serve(async(req:Request)=>{
     if(!validId(id))return send({error:"Invalid source mapping"},400);
     const {error}=await client.from("bb_invoice_photo_routes").delete().eq("route_id",id);
     if(error)throw Error("Unable to delete mapping");
+    return send({ok:true});
+  }
+  if(action==="reviewer_test"){
+    const id=Number(body.route_id);
+    if(!validId(id))return send({error:"Save source and reviewer before testing"},400);
+    const {data:route,error}=await client.from("bb_invoice_photo_routes").select("route_label,reviewer_telegram_user_id").eq("route_id",id).maybeSingle();
+    if(error||!route)return send({error:"Source mapping not found"},404);
+    const reviewer=clean(route.reviewer_telegram_user_id);
+    if(!validPrivateUser(reviewer))return send({error:"No private reviewer configured"},400);
+    await tg("sendMessage",{chat_id:reviewer,text:"✅ BIG BROTHER — Invoice Photo Organizer\nPrivate correction chat test successful for: "+route.route_label+"\nWhen an invoice is unclear, only this private chat will receive the verification question.\nNo invoice or accounting records were sent."});
     return send({ok:true});
   }
   if(action==="destination_save"){
