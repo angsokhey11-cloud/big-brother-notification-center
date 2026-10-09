@@ -27,6 +27,7 @@ button:disabled{opacity:.46;cursor:not-allowed}.wide{width:100%;margin-top:14px}
 .customer-suggestions{border:1px solid #47769b;border-radius:11px;background:#0d273f;margin:6px 0 12px;padding:5px;max-height:260px;overflow-y:auto;overscroll-behavior:contain}
 .customer-suggestions button{display:block;width:100%;text-align:left;border-radius:8px;background:transparent;color:#ecf6ff;min-height:48px;margin:0;padding:10px 12px;font-weight:550}
 .customer-suggestions button+button{border-top:1px solid #294660}
+.customer-suggestions .suggestion-location{display:block;margin-top:4px;color:#a5c7e4;font-size:12px;font-weight:500}
 .customer-suggestions button:focus,.customer-suggestions button:active{background:#284c6b;outline:2px solid #69c6ff}
 .customer-suggestions .result-note{color:#a9bfd4;padding:9px 12px;font-size:12px}
 .summaryrow{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid #2c4862}
@@ -57,7 +58,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <p class="small" id="purposeHint">Choose whether to register this for a new Invoice Generator sale.</p>
 <form id="detailsForm" novalidate>
 <div id="newDetails" class="hide">
- <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Type name or customer ID to see matches…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
+ <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Search customer name, ID, or location…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
  <label for="customer">Customer</label><select id="customer"><option value="">Select customer</option></select>
  <div class="small" id="customerHint"></div>
  <label for="payer">Bank Payer from Customer Directory</label><select id="payer"><option value="">Select payer</option></select>
@@ -112,7 +113,7 @@ const endpoint="https://sjfhlaclgmkwwofzstok.supabase.co",key="sb_publishable_w7
 const api=endpoint+"/functions/v1/bb-bank-transaction-batch-review",sessionKey="BB_BANK_NEW_INVOICE_ADMIN_SESSION";
 const batchId=new URLSearchParams(location.search).get("batch")||"";
 const el=id=>document.getElementById(id),clean=x=>String(x??"").trim();
-let session=null,batch=null,items=[],customers=[],identities=[],index=0,busy=false,choice="",popupShownFor="",suggestedByName=new Map();
+let session=null,batch=null,items=[],customers=[],identities=[],locationNames=new Map(),index=0,busy=false,choice="",popupShownFor="",suggestedByName=new Map();
 function section(name){for(const id of ["loading","login","review","summary","complete"])el(id).classList.toggle("hide",id!==name)}
 function say(message,failed=false){el("alert").textContent=message;el("alert").className="notice"+(failed?" err":"");el("alert").classList.remove("hide")}
 function clear(){el("alert").classList.add("hide")}
@@ -134,11 +135,23 @@ async function rpc(name,args={}){let jwt=await token();const request=t=>fetch(en
 async function call(action,args={}){const res=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,batch_id:batchId,init_data:initData,session_jwt:await token(),...args})});return decode(res)}
 async function signIn(email,password){const res=await fetch(endpoint+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:key,"content-type":"application/json"},body:JSON.stringify({email,password})});putSession(await decode(res))}
 function lock(value){busy=value;for(const id of ["next","previous","approve","addPayer","saveBank","jumpSummary"]){el(id).disabled=value}}
+function customerLocationText(c){
+ const code=clean(c?.location_code);
+ if(!code)return "Location not assigned";
+ const name=clean(locationNames.get(code));
+ return name&&norm(name)!==norm(code)?name+" ("+code+")":code;
+}
+function customerLabel(c){
+ return clean(c.customer_name||c.customer_id)+" — "+c.customer_id+" · "+customerLocationText(c);
+}
+function updateCustomerLocationHint(c){
+ el("customerHint").textContent=c?"📍 Customer location: "+customerLocationText(c):"Select the correct customer and location.";
+}
 function pickCustomerOptions(){
  const previous=el("customer").value;
  el("customer").replaceChildren(new Option("Select customer",""));
  for(const c of customers){
-  el("customer").add(new Option(clean(c.customer_name||c.customer_id)+" — "+c.customer_id,c.customer_id));
+  el("customer").add(new Option(customerLabel(c),c.customer_id));
  }
  if(customers.some(c=>c.customer_id===previous))el("customer").value=previous;
 }
@@ -152,14 +165,15 @@ function selectCustomer(c){
  el("customerSearch").value="";
  hideCustomerSuggestions();
  populatePayers();
- el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · Selected for this transaction";
+ el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · "+customerLocationText(c)+" · Selected for this transaction";
+ updateCustomerLocationHint(c);
  el("customerSearch").blur();
 }
 function showCustomerSuggestions(){
  const term=norm(el("customerSearch").value),panel=el("customerSuggestions");
  panel.replaceChildren();
  if(!term){panel.classList.add("hide");return}
- const matched=customers.filter(c=>norm(clean(c.customer_name||"")+" "+c.customer_id).includes(term));
+ const matched=customers.filter(c=>norm(clean(c.customer_name||"")+" "+c.customer_id+" "+customerLocationText(c)).includes(term));
  const shown=matched.slice(0,12);
  const info=document.createElement("div");
  info.className="result-note";
@@ -168,7 +182,12 @@ function showCustomerSuggestions(){
  for(const c of shown){
   const button=document.createElement("button");
   button.type="button";
-  button.textContent=clean(c.customer_name||c.customer_id)+" — "+c.customer_id;
+  const customerName=document.createElement("span");
+  customerName.textContent=clean(c.customer_name||c.customer_id)+" — "+c.customer_id;
+  const location=document.createElement("span");
+  location.className="suggestion-location";
+  location.textContent="📍 "+customerLocationText(c);
+  button.append(customerName,location);
   button.onclick=()=>selectCustomer(c);
   panel.append(button);
  }
@@ -181,10 +200,10 @@ function matchingCustomer(sender){const matches=new Set();
 function describeCustomerMatch(invoice,payload,suggested){
  const reviewedId=clean(payload?.customer_id);
  const stored=customers.find(c=>c.customer_id===reviewedId);
- if(stored)return "👤 Customer: "+clean(stored.customer_name||stored.customer_id)+" ("+stored.customer_id+") · Reviewed selection";
+ if(stored)return "👤 Customer: "+clean(stored.customer_name||stored.customer_id)+" ("+stored.customer_id+") · "+customerLocationText(stored)+" · Reviewed selection";
  const mapped=suggested.map(id=>customers.find(c=>c.customer_id===id)).filter(Boolean);
- if(mapped.length===1)return "👤 Customer: "+clean(mapped[0].customer_name||mapped[0].customer_id)+" ("+mapped[0].customer_id+") · Bank Directory match";
- if(mapped.length>1)return "⚠️ Possible customers: "+mapped.map(c=>clean(c.customer_name||c.customer_id)+" ("+c.customer_id+")").join(" · ")+" — confirm customer before registering";
+ if(mapped.length===1)return "👤 Customer: "+clean(mapped[0].customer_name||mapped[0].customer_id)+" ("+mapped[0].customer_id+") · "+customerLocationText(mapped[0])+" · Bank Directory match";
+ if(mapped.length>1)return "⚠️ Possible customers: "+mapped.map(c=>clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · "+customerLocationText(c)).join(" · ")+" — confirm customer before registering";
  return "⚠️ Customer: Not found in Customer Bank Directory — select a customer if this is a New Invoice";
 }
 function updatePayerRegistration(){
@@ -270,6 +289,7 @@ function render(){
  el("rate").value=payload.exchange_rate||1;
  el("bankName").value=payload.bank_name||"";
  setRate();populatePayers();
+ updateCustomerLocationHint(customers.find(c=>c.customer_id===possible));
  if(payload.payer_identity_id)el("payer").value=String(payload.payer_identity_id);
  setChoice(i.review_decision||"");
  el("previous").disabled=busy||index===0;
@@ -386,7 +406,8 @@ el("customer").onchange=()=>{
  hideCustomerSuggestions();
  populatePayers();
  const c=customers.find(x=>x.customer_id===el("customer").value);
- if(c)el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · Selected for this transaction";
+ updateCustomerLocationHint(c);
+ if(c)el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · "+customerLocationText(c)+" · Selected for this transaction";
 };
 el("payer").onchange=updatePayerRegistration;
 el("currency").onchange=setRate;el("invoiceCurrency").onchange=setRate;
@@ -466,8 +487,16 @@ async function initialize(){
   const result=await call("load");
   batch=result.batch;items=result.items||[];
   if(batch.status==="completed"){section("complete");el("completeText").textContent="This batch is already complete.";return}
-  const [cs,ids]=await Promise.all([rpc("bb_bank_register_customers"),rpc("bb_customer_bank_identity_list")]);
+  const [cs,ids,locs]=await Promise.all([
+    rpc("bb_bank_register_customers"),
+    rpc("bb_customer_bank_identity_list"),
+    rpc("bb_bank_review_customer_locations").catch(err=>{
+      console.warn("Location labels unavailable; show location codes",err instanceof Error?err.name:"lookup");
+      return [];
+    })
+   ]);
   customers=Array.isArray(cs)?cs:[];identities=Array.isArray(ids)?ids:[];
+  locationNames=new Map((Array.isArray(locs)?locs:[]).map(l=>[clean(l.location_code),clean(l.location_name)]));
   index=items.findIndex(x=>!x.review_decision);if(index<0)index=0;
   if(batch.status==="processing")summary();else render();
  }catch(e){
