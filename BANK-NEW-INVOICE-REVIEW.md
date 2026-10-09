@@ -1,3 +1,29 @@
+## On-demand batch review & personal route — 09 Oct 2026
+
+**New workflow:** The Bank Assistant continues normal transaction analysis and normal replies for each forwarded TEXT/CAPTION bank notice. Eligible notices are silently held as temporary candidates. No review message or register-button is automatically sent on every bank notice. Only `/reviewtransaction` initiates a private batch.
+
+**Personal routing:** An authorized admin maps each Bank Assistant group/topic to a particular authorized private Telegram account in [Bank Personal Review Routes](bank-review-routing.html) (available from Telegram Manager). `bb_bank_review_personal_routes` is unique per group/topic. If no route exists or is paused, the bot does NOT fall back to the command sender or any guess.
+
+- In a mapped Bank Assistant topic, an authorized admin sends `/reviewtransaction`. The command is queued behind earlier bank forwards so previous standard analysis completes first. The bot finds that topic's configured private reviewer and sends the WebApp task ONLY to that personal chat.
+- In a private Telegram bot chat, an authorized reviewer may use `/reviewtransaction` only when exactly one active Bank Assistant personal route belongs to that account. If multiple mapped topics belong to the same person, request review inside the specific Bank Assistant topic to prevent mixing financial locations.
+- A second command for the same pending batch reopens it, not duplicates it. A reviewer cannot start another topic's batch until the current one is complete.
+- All review candidates are scoped to the specific source chat/topic and assigned reviewer. Drafts expire after approximately 24 hours, with periodic cleanup.
+- The new [Bank Transaction Batch Review](bank-transaction-batch-review.html) Mini App requires a signed Telegram WebApp session AND active BIG BROTHER administrator login.
+- Review every parsed bank transaction: **New Invoice** (choose customer and saved payer, confirm currency/date/transaction ID) or **Leave Alone** (A/R, previous invoice, deposits, other).
+- A missing customer's bank payer opens the Customer Bank Directory popup. This uses existing admin-protected `bb_customer_bank_identity_save`; existing matching identity is selected to avoid duplicate entries.
+- After every item is reviewed, the final summary shows selected vs ignored transactions. Admin confirms a second time to register ONLY New Invoice selections.
+- Each approved transaction uses existing `bb_bank_register_invoice_tx_v4` under that admin's authenticated Supabase JWT, preserving all duplicate transaction/finance checks. On network ambiguity, the Mini App first checks the recorded transaction against the reviewed draft before trying again, and successful rows are skipped. A/R invoice payment and collection writes are NEVER made by this workflow.
+- If a bank notice's sender/amount/currency cannot be parsed, its usual Bank Assistant warning still appears; it will not silently fabricate a review entry.
+- For this release only **text/caption bank notifications**, not photo-only bank-slip OCR, are eligible.
+
+**DEV components:** `bb-bank-assistant` v40; `bb-bank-transaction-batch-review` v1; migrations for `bb_bank_transaction_review_batches`, `bb_bank_review_personal_routes` and enhanced draft metadata; admin SQL RPC `bb_bank_review_route_list`/`bb_bank_review_route_save`; cleanup cron jobs for drafts and batches.
+
+**Verification:** DB test with 10 synthetic notices -> one assigned batch -> repeated request reopens it -> unrelated reviewer denied, all rolled back. Admin route RPC list and save passed using rolled-back admin login. Frontend routing and batch-review JavaScript syntax compiled. Edge source matches deployed versions. **Live Telegram bank-forward → batch → directory popup → final registration is NOT YET end-to-end tested. Do not test with actual accounting transactions until the no-write flow works.**
+
+**Setup required:** No private Bank Assistant routes were automatically created. An admin must map the intended reviewer User ID(s) to the active Bank Assistant group/topic(s) in Telegram Manager. This is intentionally explicit to avoid sending financial data to the wrong Telegram account.
+
+---
+
 # New Invoice — Telegram Bank Register Review
 
 ## Status — 09 Oct 2026
