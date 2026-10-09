@@ -446,6 +446,24 @@ async function callback(cb:any){
  await reply(m,"✅ បានរក្សាទុកឈ្មោះអ្នកផ្ទេរហើយ។ សារជូនដំណឹងបន្ទាប់អាចផ្គូផ្គងនឹងអតិថិជននេះបាន។");
 }
 
+// Simple private Telegram ID lookup; do not expose any other user's identity or affect group routes.
+async function replyToPrivateIdentity(m:any):Promise<boolean>{
+ if(val(m?.chat?.type)!=="private"||m.from?.is_bot===true)return false;
+ const id=val(m.from?.id),chat=val(m.chat?.id);
+ if(!/^[0-9]{5,20}$/.test(id)||id!==chat)return false;
+ const t=val(m.text);
+ const start=/^\/start(?:@\w+)?(?:\s+\S{1,64})?$/i.test(t);
+ const myid=/^\/myid(?:@\w+)?$/i.test(t)||/^(?:id|my id)$/i.test(t);
+ if(!start&&!myid)return false;
+ const message=(start?"👋 <b>Welcome to BIG BROTHER Bot!</b>\n\n":"")
+  +"🪪 <b>Your Telegram User ID</b>\n<code>"+escape(id)+"</code>\n\n"
+  +"Copy this number into <b>Telegram Manager → Invoice Photo Organizer → Private Reviewer Telegram User ID</b>.\n\n"
+  +"Type <code>ID</code> or <code>/myid</code> anytime to see your ID.\n\n"
+  +"📸 The invoice photo-forwarding and review workflow is not active yet; please wait before sending business invoice photos.";
+ await reply(m,message);
+ return true;
+}
+
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
@@ -524,6 +542,8 @@ Deno.serve(async(req:Request)=>{
   try{await ensureTelegramCommands();}catch(e){console.warn("Telegram command menu setup failed",e instanceof Error?e.message:"error");}
   const u=await req.json(),m=u.message;
   if(m){
+    // Reply privately and stop; mapped group Bank Assistant handling remains untouched.
+    if(await replyToPrivateIdentity(m))return Response.json({ok:true});
     const scope=await bankScope(m);
     if(scope){
       if(await scopeAllows(m,scope)){
