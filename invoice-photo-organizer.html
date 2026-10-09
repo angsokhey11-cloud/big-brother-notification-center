@@ -28,7 +28,7 @@ code{color:#a9d9ff}.hidden{display:none!important}
 <p>Forward only your selected invoice pictures to the BIG BROTHER bot <strong>in your private Telegram chat</strong>. Review every invoice before sending the finished albums to mapped groups, topics and your own private chat. No group photos are collected automatically.</p>
 <section class="panel">
 <h2>Current setup</h2>
-<p class="warn"><strong>Configuration stage:</strong> Photo intake, private review conversations, image correction, and album delivery are not activated yet. Existing Bank Assistant remains unchanged. Mapping is ready for manual-review workflow development.</p>
+<p class="warn"><strong>Original-photo delivery mode:</strong> Private forwarding, two-box review, date/number sorting and group/private albums are connected. Automatic paper-edge cropping and perspective correction are NOT enabled yet; the original Telegram images are delivered unchanged to avoid altering invoice details. Enable private intake only when ready to test.</p>
 <div id="status" class="status" role="status">Checking administrator session…</div>
 <div class="toolbar"><button id="refresh" class="secondary">Refresh mappings</button><span class="chip" id="queueCount">Temporary queue: —</span></div>
 </section>
@@ -46,7 +46,7 @@ code{color:#a9d9ff}.hidden{display:none!important}
 <div class="toolbar"><button type="submit">Save source</button><button type="button" id="clearSource" class="secondary">New source</button></div>
 </form>
 <p class="small">To check the current connection now, open the <strong>BIG BROTHER Bot private Telegram chat</strong> and send <code>PHOTO</code> or <code>/photostatus</code>. This shows your saved private reviewer and group/private output mapping. Send <code>/phototest</code> privately to post a harmless test message to each mapped destination. Use <code>ID</code>, <code>/myid</code> or <code>/start</code> to see your Telegram User ID.</p>
-<p class="small"><strong>Upcoming feature:</strong> After you forward selected invoice pictures directly into the private bot chat, the bot will make a review task for <strong>every forwarded photo</strong>, let you confirm dates and numbers, and wait for your final approval. This image processing feature is not active yet, so don't send invoice photos for processing at this stage.</p>
+<p class="small"><strong>Available when private intake is enabled:</strong> Forward selected pictures to the bot privately. Send <code>/done</code>, or wait about a minute for an automatic review task. Tap its review button, fill the date and number for each original picture, and select <strong>Approve &amp; Send</strong> when all are verified. <code>/cancel</code> discards an unfinished batch. Delivery uses original photos; automatic crop/deskew is still under development.</p>
 <h2 style="margin-top:26px">Saved sources</h2><div id="sources"></div>
 </section>
 <section class="panel">
@@ -66,11 +66,11 @@ code{color:#a9d9ff}.hidden{display:none!important}
 <h2 style="margin-top:26px">Saved destinations</h2><div id="destinations"></div>
 </section>
 <section class="panel">
-<h2>3. Private forwarding and review workflow (planned)</h2>
+<h2>3. Private forwarding and review workflow</h2>
 <p><strong>You forward only the relevant invoice photos into your private bot conversation</strong> → bot collects that private batch → creates a private review task for every forwarded invoice → you enter or edit the printed invoice number and date for each → bot shows an editable summary → <strong>you explicitly approve the whole batch</strong> → bot carefully corrects the original photographs without recreating their content → sorts by confirmed date and number → sends albums to your mapped group/topic and private chat → deletes temporary file references and working copies.</p>
 <p><strong>Example private task:</strong> 📸 14 photos received. Review 1/14. The bot shows the original picture; you reply <code>002351 | 07/10/2026</code>. Use Next/Previous/Edit to verify the rest, then select <strong>Approve &amp; Send</strong> after all 14 are checked.</p>
 <p><strong>Privacy and safety:</strong> No correction questions in the staff group; no delivery until ALL photos are confirmed by the assigned private reviewer. Metadata is used to sort, not to alter handwriting on the image. Temporary pending reviews have a planned 24-hour expiry; the review bot will need expiry reminders and failure handling before activation.</p>
-<p>Configure both the <strong>delivery group/topic</strong> and <strong>your private chat</strong> as enabled output destinations. Open the private bot chat and press <strong>Start</strong> before forwarding. The bot does not need to read group pictures; it only needs permission to <strong>post</strong> the completed pictures to mapped group/topic destinations. The image processor and webhook intake are not active yet.</p>
+<p>Configure both the <strong>delivery group/topic</strong> and <strong>your private chat</strong> as enabled output destinations. Open the private bot chat and press <strong>Start</strong> before forwarding. The bot does not read photos in any group. The current release sends original Telegram photos safely; automatic crop/deskew is not connected yet.</p>
 </section>
 </main>
 <script src="https://angsokhey11-cloud.github.io/big-brother-admin-work/supabase-admin-work-adapter.js"></script>
@@ -98,9 +98,10 @@ function render(){
  $('destRoute').innerHTML='<option value="">Select a source…</option>'+routeChoices;
  if(routes.some(r=>String(r.route_id)===previous))$('destRoute').value=previous;
  $('sources').innerHTML=routes.length?routes.map(r=>
-  '<div class="row"><h3>'+esc(r.route_label)+' <span class="chip">Not active</span></h3>'+
+  '<div class="row"><h3>'+esc(r.route_label)+' <span class="chip">'+(r.active?'Private intake enabled':'Private intake paused')+'</span></h3>'+
   '<p>Private intake/reviewer: <code>'+esc(r.reviewer_telegram_user_id||'Not set')+'</code> · Auto-review idle: '+esc(r.idle_seconds)+'s · Intake: <strong>Only pictures forwarded privately</strong> · Verification: <strong>Manual review of every photo</strong></p>'+
-  '<div class="toolbar"><button type="button" class="secondary" data-route-edit="'+r.route_id+'">Edit</button>'+ 
+  '<div class="toolbar"><button type="button" class="secondary" data-route-edit="'+r.route_id+'">Edit</button>'+
+  '<button type="button" class="secondary" data-route-toggle="'+r.route_id+'">'+(r.active?'Pause private intake':'Enable private intake')+'</button>'+ 
   '<button type="button" class="secondary" data-reviewer-test="'+r.route_id+'">Test private reviewer</button>'+
   '<button type="button" class="danger" data-route-remove="'+r.route_id+'">Delete</button></div></div>'
  ).join(''):'<p>No sources configured yet.</p>';
@@ -133,10 +134,19 @@ $('destForm').onsubmit=async e=>{
  }catch(err){status(err.message,true)}
 };
 $('sources').onclick=async e=>{
- const edit=e.target.closest('[data-route-edit]'),remove=e.target.closest('[data-route-remove]'),test=e.target.closest('[data-reviewer-test]');
+ const edit=e.target.closest('[data-route-edit]'),remove=e.target.closest('[data-route-remove]'),test=e.target.closest('[data-reviewer-test]'),toggle=e.target.closest('[data-route-toggle]');
  if(edit){const r=routes.find(x=>String(x.route_id)===edit.dataset.routeEdit);if(!r)return;
   $('sourceId').value=r.route_id;$('sourceLabel').value=r.route_label;
   $('sourceIdle').value=r.idle_seconds;$('reviewerUser').value=r.reviewer_telegram_user_id||'';$('sourceForm').scrollIntoView({behavior:'smooth'});}
+ if(toggle){
+  const r=routes.find(x=>String(x.route_id)===toggle.dataset.routeToggle);
+  if(!r)return;
+  const next=!r.active;
+  if(next&&!confirm('Enable PRIVATE forwarding intake and real invoice album delivery? Use a non-sensitive test invoice first. Groups will remain OUTPUT only.'))return;
+  if(!next&&!confirm('Pause collecting new privately forwarded invoice photos?'))return;
+  try{await call('route_set_active',{route_id:Number(r.route_id),active:next});await load();status(next?'✅ Private forwarding intake enabled. Test with one sample forwarded invoice first.':'⏸ Private forwarding intake paused.')}
+  catch(err){status(err.message,true)}
+ }
  if(test){if(!confirm('Send a harmless test message to the mapped private reviewer?'))return;
   try{await call('reviewer_test',{route_id:Number(test.dataset.reviewerTest)});status('✅ Private reviewer test delivered.')}catch(err){status(err.message,true)}}
  if(remove){if(!confirm('Delete this source and all its destination mappings?'))return;
