@@ -33,6 +33,12 @@ button:disabled{cursor:not-allowed;opacity:.42}
 kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
 .footer{font-size:12px;color:#83a3bf;margin-top:16px}
 [aria-live]{min-height:1em}
+.day-group{background:#0c1c30;border:1px solid #345778;border-radius:12px;padding:12px;margin:12px 0}
+.day-group h3{margin:0 0 8px;font-size:15px;color:#eaf5ff}
+.range-line{padding:9px 0;border-top:1px solid #29415d;line-height:1.55;overflow-wrap:anywhere}
+.range-line strong{color:#91d2ff}
+.range-line small{display:block;color:#b1c6df;line-height:1.55}
+.note{font-size:12px;color:#9ab7d5;line-height:1.55;margin:6px 0 14px}
 </style></head>
 <body><main class="wrap">
 <div class="top"><span class="logo">📸 BIG BROTHER · INVOICE REVIEW</span><span class="pill" id="mode">Loading…</span></div>
@@ -65,6 +71,10 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
 <section id="summary" class="card hide">
  <div class="row"><h2 style="margin:0">Batch review summary</h2><span id="completeCount" class="pill"></span></div>
  <p>Check all invoice dates and numbers. Tap Edit to return to any picture.</p>
+ <h3 style="margin:16px 0 8px">📅 Summary by date &amp; invoice range</h3>
+ <p class="note">Separate number ranges are detected when the gap between two confirmed invoice numbers is over 20. “Range difference” = last − first; “Skip positions” are missing offsets from the start, beginning at 01.</p>
+ <div id="rangeSummary"></div>
+ <h3 style="margin:18px 0 8px">🧾 Individual invoices</h3>
  <div id="summaryList"></div>
  <p id="deliveryNotice" class="subtle">After confirming all pictures, the bot will send your sorted original photos to your mapped group/topic and private chat.</p>
  <button class="primary wide" id="approve" disabled>Approve &amp; Send</button>
@@ -78,7 +88,7 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
 const tg=window.Telegram?.WebApp,initData=tg?.initData||"";
 const api="https://sjfhlaclgmkwwofzstok.supabase.co/functions/v1/bb-invoice-photo-review";
 const el=id=>document.getElementById(id);
-let items=[],batch=null,index=0,preview=false,blobUrl=null,busy=false;
+let items=[],batch=null,index=0,preview=false,blobUrl=null,busy=false,rememberedDate="";
 tg?.ready?.();tg?.expand?.();
 const safe=(x)=>String(x??"");
 const status=(message,error=false)=>{el("alert").textContent=message;el("alert").className="msg"+(error?" error":"");el("alert").classList.remove("hide")};
@@ -100,7 +110,7 @@ async function render(){
  el("counter").textContent="Picture "+(index+1)+" of "+items.length;
  el("reviewCount").textContent=completed()+" confirmed";
  el("bar").style.width=Math.round(completed()/items.length*100)+"%";
- el("date").value=i.invoice_date||"";
+ el("date").value=i.invoice_date||rememberedDate;
  el("number").value=i.invoice_no||"";
  // Always start the new invoice on Date. Keep photo visible rather than scrolling to the field.
  el("date").focus({preventScroll:true});
@@ -127,6 +137,8 @@ async function saveCurrent(){
   const r=await call("save",{batch_id:batch.batch_id,queue_id:item.queue_id,invoice_no:n,invoice_date:d});
   Object.assign(item,r.item);
  }else Object.assign(item,{invoice_no:n,invoice_date:d,review_state:"confirmed"});
+ // Apply only to future, still-unreviewed pictures; never overwrite confirmed dates.
+ rememberedDate=d;
 }
 async function move(next){
  if(busy)return;
@@ -151,9 +163,75 @@ async function move(next){
   }
  }
 }
+// Range detector: count actual reviewed invoice photos, not estimated sequence size.
+// Start/end keep the reviewer-entered serial text including leading zeroes.
+// Missing numbers are shown as offsets from each range's first invoice: e.g.
+// 2220 -> 2225 becomes "05"; 3300 -> 3312 becomes "12".
+function buildRangeSummary(rows){
+ const perDate=new Map();
+ for(const r of rows){
+  if(r.review_state!=="confirmed"||!/^\d{4}-\d{2}-\d{2}$/.test(r.invoice_date||"")||!/^\d{1,16}$/.test(r.invoice_no||""))continue;
+  if(!perDate.has(r.invoice_date))perDate.set(r.invoice_date,[]);
+  perDate.get(r.invoice_date).push(r);
+ }
+ const days=[];
+ for(const date of [...perDate.keys()].sort()){
+  const invoices=perDate.get(date).slice().sort((a,b)=>{
+   const diff=BigInt(a.invoice_no)-BigInt(b.invoice_no);
+   return diff<0n?-1:diff>0n?1:Number(a.source_message_id||0)-Number(b.source_message_id||0);
+  });
+  const parts=[];
+  for(const invoice of invoices){
+   const n=BigInt(invoice.invoice_no);
+   const last=parts[parts.length-1];
+   if(!last||n-last.end>20n)parts.push({first:invoice.invoice_no,last:invoice.invoice_no,start:n,end:n,numbers:new Set([n.toString()]),count:1});
+   else{last.last=invoice.invoice_no;last.end=n;last.numbers.add(n.toString());last.count++;}
+  }
+  const ranges=parts.map(g=>{
+   const skip=[];
+   for(let n=g.start+1n;n<g.end;n++)if(!g.numbers.has(n.toString()))skip.push(String(n-g.start).padStart(2,"0"));
+   return {first:g.first,last:g.last,count:g.count,difference:String(g.end-g.start),skip};
+  });
+  days.push({date,count:invoices.length,ranges});
+ }
+ return days;
+}
+function readableInvoiceDate(date){
+ const [y,m,d]=date.split("-");
+ const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+ return d+"-"+(months[Number(m)-1]||m)+"-"+y;
+}
+function renderRangeSummary(rows){
+ const container=el("rangeSummary");
+ container.replaceChildren();
+ const dates=buildRangeSummary(rows);
+ if(!dates.length){
+  const msg=document.createElement("p");
+  msg.className="note";msg.textContent="Confirm invoice dates and numbers to generate the date/range summary.";
+  container.append(msg);
+  return;
+ }
+ for(const day of dates){
+  const card=document.createElement("div");card.className="day-group";
+  const title=document.createElement("h3");
+  title.textContent="📅 "+readableInvoiceDate(day.date)+" — "+day.count+" invoice"+(day.count===1?"":"s");
+  card.append(title);
+  day.ranges.forEach((range,j)=>{
+   const line=document.createElement("div");line.className="range-line";
+   const heading=document.createElement("strong");
+   heading.textContent="Range "+(j+1)+": "+range.first+"–"+range.last+" = "+range.difference;
+   const detail=document.createElement("small");
+   detail.textContent=range.count+" reviewed invoice"+(range.count===1?"":"s")+" · Skip "+(range.skip.length?range.skip.join(", "):"None");
+   line.append(heading,detail);card.append(line);
+  });
+  container.append(card);
+ }
+}
+
 function showSummary(){
  section("summary");clearStatus();
  const n=completed();el("completeCount").textContent=n+"/"+items.length+" checked";
+ renderRangeSummary(items);
  const arr=[...items].sort((a,b)=>safe(a.invoice_date).localeCompare(safe(b.invoice_date))||
   safe(a.invoice_no).localeCompare(safe(b.invoice_no),undefined,{numeric:true})||
   Number(a.source_message_id||0)-Number(b.source_message_id||0));
@@ -180,6 +258,10 @@ function showSummary(){
   :ready?"After approval, the bot sends the original, unaltered invoice photos sorted by your confirmed date and number. Printed invoice details remain intact."
   :"Complete the date and number for EVERY picture before approving.";
 }
+// Sticky date applies when the reviewer changes the field, including using a date picker.
+for(const eventName of ["input","change"])el("date").addEventListener(eventName,()=>{
+ if(el("date").value)rememberedDate=el("date").value;
+});
 // Physical keyboard navigation: ↑ and ↓ both toggle between the two review fields.
 // Prevent native date-field arrow keys from silently changing the selected date.
 for(const field of [el("date"),el("number")]){
@@ -231,7 +313,7 @@ el("approve").onclick=async()=>{
  }
 };
 el("demo").onclick=()=>{
- preview=true;batch={status:"awaiting_review"};items=[
+ preview=true;rememberedDate="";batch={status:"awaiting_review"};items=[
   {queue_id:1,source_message_id:1,invoice_no:"",invoice_date:"",review_state:"pending_review"},
   {queue_id:2,source_message_id:2,invoice_no:"",invoice_date:"",review_state:"pending_review"},
   {queue_id:3,source_message_id:3,invoice_no:"",invoice_date:"",review_state:"pending_review"}];
@@ -250,6 +332,9 @@ async function init(){
   const out=await call("load");
   if(out.empty||!out.items?.length){el("mode").textContent="No review task";section("empty");el("emptyText").textContent="No active invoice batch yet. Forward your chosen invoice photos to the bot privately. Then tap /done or wait for the automatic review message.";return}
   batch=out.batch;items=out.items;index=items.findIndex(x=>x.review_state!=="confirmed");if(index<0)index=0;
+  // Resume the saved date when reopening an interrupted review.
+  rememberedDate=items.slice(0,index).reverse().find(x=>x.invoice_date)?.invoice_date||
+    items.find(x=>x.invoice_date)?.invoice_date||"";
   el("mode").textContent=batch.status==="collecting"?"Collecting":batch.status==="failed"?"Delivery issue":"Private review";
   await render();
  }catch(e){el("mode").textContent="Connection issue";section("empty");el("emptyText").textContent="Your forwarded pictures are still saved. Loading failed: "+e.message+" Tap Retry loading real invoices; do not forward the pictures again.";}
