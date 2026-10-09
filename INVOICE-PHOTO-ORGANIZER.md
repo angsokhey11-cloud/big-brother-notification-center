@@ -1,35 +1,47 @@
 # BIG BROTHER — Invoice Photo Organizer
-Status: routing editor, configurable private-reviewer mapping, and secure admin API deployed to BIG BROTHER DEV on 09-Oct-2026. **Photo processing and incoming private correction handling are not yet activated.** Existing Bank Assistant webhook is unchanged.
 
-## User-approved workflow
-1. An administrator maps one source Telegram group, forum topic, or private chat.
-2. An administrator maps one or many destination chats (group/topic/private); all IDs are DB-configured, never hard-coded.
-3. Staff upload one picture per physical invoice. Several pictures are collected until a configurable idle interval (default 60 seconds).
-4. If the invoice number OR date cannot be read confidently, send the original invoice preview and a specific correction question **only to the route's configured private reviewer** (positive Telegram User ID, no hard-coded recipient). Never ask in the group. Only the matching private Telegram account can supply corrected invoice number/date. An unanswered item stays pending until its short retention expiry.
-5. Upon private confirmation, resume the pending collection, sort correctly, and send finished albums both to the mapped group/topic and mapped private chat. The reviewer must be able to receive private messages and the private chat must also be an active output destination.
-4. Detect paper bounds, carefully crop/straighten/rotate, improve readability using real deterministic image operations **only**. Do not use image generation, redraw characters, modify signatures/QRs, or retouch financial content.
-5. Read invoice date, then invoice number using a verified OCR/vision engine. Sort ascending date, then ascending invoice number. Duplicate invoice numbers remain separate. Uncertain dates/numbers require review.
-6. Send original-image-derived processed photos to every enabled destination via Telegram's `sendMediaGroup` in groups of 2 to 10. If last group contains one item, use `sendPhoto`. ONE invoice = ONE picture; no contact sheets or collage.
-7. Delete temporary image bytes, file references and row metadata once delivery succeeds to all destinations. On failures, retry within 2 hours, then expire and delete. Telegram's own chat/media storage is outside our database's control.
+**Status (09 Oct 2026):** Routing UI, configurable private reviewer, mandatory-manual review configuration and ephemeral review-task database structures are implemented on BIG BROTHER DEV. **Photo collection webhook, private Telegram question/reply handlers, image correction and album delivery are not built/activated yet.** The existing Bank Assistant webhook and code are unchanged.
 
-## Installed admin mapping
-UI: `invoice-photo-organizer.html` linked from Notification Center sidebar.
-API: `bb-invoice-photo-routing` (JWT required, checks active BIG BROTHER admin).
-DB:
-- `bb_invoice_photo_routes` — unique source group/chat + thread, idle seconds, **reviewer_telegram_user_id** for private correction, inactive until worker verified
-- `bb_invoice_photo_destinations` — unlimited destination mappings per source
-- `bb_invoice_photo_queue` — ephemeral Telegram file IDs only; no images or blobs
+## Final agreed operation — human review is REQUIRED for every image
 
-All 3 tables have RLS enabled and direct browser access revoked. `cron.job` `bb_invoice_photo_queue_ttl` deletes expired temporary references every 15 minutes. Admin endpoint supplies harmless `destination_test` action.
+1. Staff upload one original photo for each paper invoice to a mapped source Telegram group, topic, or private chat.
+2. Bot collects the photos into one review batch when the source has been idle for its configured interval (default 60 seconds). Number of photos is unrestricted; 14 photos is a normal example.
+3. Bot creates ONE **private Telegram review task** for the mapped reviewer (the positive numeric Telegram User ID from Telegram Manager). Staff groups must never receive review questions. Reviewer must have started a private chat with the bot.
+4. Show each original photo in turn and prompt the reviewer for **both the invoice number and invoice date on every photo**, even if an OCR attempt appears certain. A good UX is `002351 | 07/10/2026` with Next/Previous/Edit navigation. The bot can omit OCR entirely.
+5. After every photo has confirmed metadata, show the ordered summary and provide a final **Approve & Send** action. The reviewer can change any date/number before final approval.
+6. A separate image worker crops/straightens/enhances ORIGINAL photo pixels conservatively, preserving all handwriting, QR codes, amounts, and signatures. Never use generative image recreation; never visually replace printed/written numbers or dates.
+7. Sort photos by reviewer-confirmed invoice date and then reviewer-confirmed invoice number (preserve leading zeros and duplicate numbers). Send the corrected original-image-derived photos as Telegram albums of up to 10, one original invoice per individual picture. When an album would contain exactly one photo, use `sendPhoto`.
+8. Send the same ordered albums to **all enabled mapped destinations**, including the source group/topic and the private chat. Each target must be mapped in Telegram Manager, no hardcoded chat IDs.
+9. After successful delivery to ALL required destinations, immediately remove temporary file references, review metadata, and processing copies; no permanent invoice image storage. Track successful destinations until full success to avoid duplicating albums on retries.
+10. Pending human-review jobs are temporary and expire after 24 hours by default. The future worker should remind the reviewer before expiry and explain if data expires; it must never silently auto-approve or send unreviewed photos. Temporary data is removed on expiry. Telegram's own chat media history is not deleted by our bot's database cleanup.
 
-## Required remaining work before activation
-- Select and configure a vision/OCR service; validate extraction against uploaded handwritten/printed examples. Handle unreadable dates without inventing.
-- Build an image-correction worker for Supabase Edge Functions (ImageMagick WASM is documented as supported, native Sharp is not).
-- Build batch finalization, queue lock/idempotency and per-destination delivery checks. Ensure recipient failures do not resend to successful destinations.
-- Add a webhook dispatcher branch to `bb-bank-assistant` **only after** end-to-end tests; preserve the existing banking path and Telegram webhook secret.
-- Finish group/private chat access verification and opt-in. Private reviewer and private output recipient must first start the bot. Telegram group must allow bot to read photos. Add an incoming-webhook private reply handler restricted to the configured reviewer, with idempotent one-time confirmation, and ensure no correction questions are posted to staff groups.
-- Require at least one group/topic and the configured reviewer's private chat as active delivery destinations before activating any source; de-duplicate if destinations overlap.
-- Run live test in a dedicated test group with non-sensitive example invoices, then allow admin to activate sources.
+## Implemented artifacts
 
-## Safety
-No accounting writes. No permanent invoice picture data. Never pass service-role credentials to browser, never expose Telegram token. Provider retention requirements must be disclosed and separately configured if an external AI vision service is used. Source routes are deliberately saved `active=false` by current admin function to prevent premature processing.
+- `invoice-photo-organizer.html`: Admin Telegram Manager entry for mapping source and destinations, mandatory manual review notice, reviewer user ID, harmless test.
+- Supabase `bb-invoice-photo-routing`: JWT-required, active BIG BROTHER admin-authenticated API for mapping. Source mappings are always saved **inactive** until review bot and image processor are safe to enable.
+- `bb_invoice_photo_routes`: one source per group/thread, a configured private reviewer, idle interval, `review_mode='manual_all'` enforced by a database CHECK.
+- `bb_invoice_photo_destinations`: many configurable group/topic/private output chats per source.
+- `bb_invoice_photo_review_batches`: temporary grouped task, private reviewer, collecting/review/delivery status and 24-hour expiry. No image bytes.
+- `bb_invoice_photo_queue`: temporary Telegram photo file IDs, optional review batch ID, per-image `review_state` requiring confirmation, invoice number, date, reviewer ID and timestamp. No image bytes.
+- 15-minute cron jobs `bb_invoice_photo_queue_ttl` and `bb_invoice_photo_review_batch_ttl` purge expired temporary records.
+- All new tables have RLS enabled and direct anon/authenticated access revoked.
+
+## Remaining implementation and QA
+
+1. Build an authenticated incoming-photo dispatcher branch. Preserve existing Telegram webhook secret validation and all Bank Assistant behavior.
+2. Build batch collection and de-duplication by Telegram update/message identifiers.
+3. Build private review task creation, per-photo previews, typed number/date answer parsing and validation, per-photo corrections, explicit final batch approval, and unique reviewer authorization. The review message must never be delivered to a group.
+4. Enforce backend delivery gate: all photos have confirmed metadata AND the matching assigned private reviewer clicked final approve. Fail closed; never trust OCR.
+5. Build non-generative perspective/crop/contrast image processor and test with paper invoice samples; if uncertain, preserve entire original photo.
+6. Build sorted Telegram mediaGroup delivery to mapped group and private chat (10 max), retry state per destination; handle singleton last group.
+7. Build safe review TTL reminders, expiry reporting, cleanup on success and on expiry.
+8. Run full dry-run and live tests using non-sensitive sample invoices in a dedicated test group. Only then add admin-controlled activation.
+
+## Non-negotiables
+
+- No paid AI Vision or OCR is required for date/number recognition; manual private reviewer input is the authority.
+- No changes to accounting records.
+- No AI document redraws; dates/numbers are sorting metadata, not edits to the image's content.
+- No auto-approval even if software predicts date/number.
+- No permanent picture database.
+- No Telegram IDs embedded in bot source.
