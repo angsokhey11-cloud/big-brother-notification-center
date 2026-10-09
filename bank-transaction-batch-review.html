@@ -176,7 +176,7 @@ function updatePayerRegistration(){
  }
 }
 function populatePayers(){
- const cid=el("customer").value,previous=el("payer").value;
+ const cid=el("customer").value;
  el("payer").replaceChildren(new Option("Select bank payer",""));
  const list=identities.filter(x=>x.customer_id===cid&&x.active===true);
  for(const x of list)el("payer").add(new Option(clean(x.account_holder_name)+" — "+x.bank_name,String(x.identity_id)));
@@ -184,7 +184,6 @@ function populatePayers(){
  const exact=list.filter(x=>[x.account_holder_name,...(x.alternative_names||[])]
    .some(name=>norm(name)===norm(current().sender_name)));
  if(saved&&list.some(x=>String(x.identity_id)===String(saved)))el("payer").value=String(saved);
- else if(previous&&list.some(x=>String(x.identity_id)===previous))el("payer").value=previous;
  else if(exact.length===1)el("payer").value=String(exact[0].identity_id);
  // Don't assign a mismatched account just because it is the customer's only payer.
  updatePayerRegistration();
@@ -210,6 +209,7 @@ function render(){
  el("sender").textContent=i.sender_name||"Unknown payer";
  el("customerMatch").textContent=describeCustomerMatch(i,payload,suggested);
  el("original").textContent="Bank amount: "+money(i.amount)+" "+(i.currency||"")+"\nTransaction ID: "+(i.transaction_id||"Not supplied")+"\nSource message: "+i.source_message_id;
+ choice=""; // Prevent previous transaction choices from triggering a payer popup on the next one.
  el("customerSearch").value="";pickCustomerOptions();
  const possible=payload.customer_id|| (suggested.length===1?suggested[0]:"");
  el("customer").value=possible;
@@ -306,6 +306,7 @@ el("bankForm").onsubmit=async(e)=>{
   const existing=identities.find(x=>x.active&&x.customer_id===cid&&norm(x.bank_name)===norm(bank)&&norm(x.account_holder_name)===norm(name));
   if(existing){
     el("bankPopup").close();populatePayers();el("payer").value=String(existing.identity_id);
+    updatePayerRegistration();
     say("Existing payer selected. No duplicate created.");return;
   }
   const aliases=clean(el("aliases").value).split(",").map(clean).filter(Boolean).slice(0,12);
@@ -313,6 +314,7 @@ el("bankForm").onsubmit=async(e)=>{
     p_account_number:clean(el("accountNumber").value)||null,p_alternative_names:aliases,p_identity_id:null});
   identities=await rpc("bb_customer_bank_identity_list");
   el("bankPopup").close();populatePayers();el("payer").value=String(id);
+  updatePayerRegistration();
   say("✅ Payer saved to Customer Bank Directory. The bank transaction is NOT registered yet.");
  }catch(err){say(err.message,true)}
  finally{lock(false)}
