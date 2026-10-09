@@ -71,6 +71,74 @@ const sortInvoice=(a:any,b:any)=>val(a.invoice_date).localeCompare(val(b.invoice
  // BigInt preserves numeric ordering and leading zeros stay intact as strings.
  (BigInt(val(a.invoice_no))<BigInt(val(b.invoice_no))?-1:BigInt(val(a.invoice_no))>BigInt(val(b.invoice_no))?1:0)||
  Number(a.source_message_id)-Number(b.source_message_id);
+// Human-confirmed invoice range report for private Telegram completion.
+// Range difference is last minus first (user-facing convention); it is NOT an
+// inclusive count. Skip positions are absent serial offsets from first,
+// for example 2225 in range 2220–2233 is position "05".
+// A gap over 20 numbers starts a separate paper-book range on the same date.
+function invoiceRangeReport(rows:any[]):string[]{
+ const byDate=new Map<string,any[]>();
+ for(const r of rows){
+  const date=val(r.invoice_date),no=val(r.invoice_no);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^\d{1,16}$/.test(no))continue;
+  if(!byDate.has(date))byDate.set(date,[]);
+  byDate.get(date)!.push(r);
+ }
+ const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+ const pretty=(d:string)=>{
+  const [y,m,day]=d.split("-");
+  return day+"-"+(months[Number(m)-1]||m)+"-"+y;
+ };
+ const lines:string[]=["📊 BIG BROTHER — INVOICE RANGE SUMMARY",
+   "Confirmed invoice photos: "+rows.length,""];
+ for(const date of [...byDate.keys()].sort()){
+  const sorted=byDate.get(date)!.slice().sort((a,b)=>{
+   const d=BigInt(a.invoice_no)-BigInt(b.invoice_no);
+   return d<0n?-1:d>0n?1:Number(a.source_message_id||0)-Number(b.source_message_id||0);
+  });
+  lines.push("📅 "+pretty(date)+" — "+sorted.length+" invoice"+(sorted.length===1?"":"s"));
+  const groups:{first:string,last:string,start:bigint,end:bigint,count:number,numbers:Set<string>}[]=[];
+  for(const row of sorted){
+   const number=BigInt(row.invoice_no);
+   const current=groups[groups.length-1];
+   if(!current||number-current.end>20n){
+    groups.push({first:row.invoice_no,last:row.invoice_no,start:number,end:number,count:1,numbers:new Set([number.toString()])});
+   }else{
+    current.last=row.invoice_no;
+    current.end=number;
+    current.count++;
+    current.numbers.add(number.toString());
+   }
+  }
+  for(const [i,group] of groups.entries()){
+   const skipped:string[]=[];
+   for(let n=group.start+1n;n<group.end;n++){
+    if(!group.numbers.has(n.toString()))skipped.push(String(n-group.start).padStart(2,"0"));
+   }
+   lines.push("  Range "+(i+1)+": "+group.first+"–"+group.last+" = "+String(group.end-group.start));
+   lines.push("  "+group.count+" reviewed invoice"+(group.count===1?"":"s")+" · Skip "+(skipped.length?skipped.join(", "):"None"));
+  }
+  lines.push("");
+ }
+ lines.push("Range = last − first; skips are missing positions counted from the first number.");
+ return lines;
+}
+function telegramReportChunks(lines:string[],max=3500):string[]{
+ const chunks:string[]=[];let chunk="";
+ for(const line of lines){
+  if(line.length>max){
+   if(chunk){chunks.push(chunk.trimEnd());chunk="";}
+   // Overflow protection for very large missing-number lists.
+   for(let pos=0;pos<line.length;pos+=max)chunks.push(line.slice(pos,pos+max));
+   continue;
+  }
+  if(chunk.length+line.length+1>max){chunks.push(chunk.trimEnd());chunk="";}
+  chunk+=line+"\n";
+ }
+ if(chunk.trim())chunks.push(chunk.trimEnd());
+ return chunks;
+}
+
 async function deliverBatch(batchId:string,reviewer:string){
  const client=db();
  const {data:batch,error:be}=await client.from("bb_invoice_photo_review_batches").select("*")
@@ -151,6 +219,13 @@ async function deliverBatch(batchId:string,reviewer:string){
  if(pendingError)throw pendingError;
  if(!pending?.length){
   // Drop all private processing metadata on verified delivery to all targets.
+  // The report goes only to the mapped private reviewer, never to staff groups.
+  // Do not turn an already-successful album delivery into an error if the
+  // informational text can't be posted; never resend already-delivered albums.
+  for(const chunk of telegramReportChunks(invoiceRangeReport(ordered))){
+   try{await tg("sendMessage",{chat_id:reviewer,text:chunk});}
+   catch(e){console.warn("Private invoice range summary message failed",e instanceof Error?e.name:"unknown");}
+  }
   await tg("sendMessage",{chat_id:reviewer,text:"✅ BIG BROTHER — Invoice photo albums delivered to your mapped group/topic and private chat. Temporary review files are now cleared."}).catch(()=>{});
   const {error:cleanup}=await client.from("bb_invoice_photo_review_batches").delete().eq("batch_id",batchId);
   if(cleanup)throw cleanup;
