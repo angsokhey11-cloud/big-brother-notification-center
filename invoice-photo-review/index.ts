@@ -105,12 +105,14 @@ async function deliverBatch(batchId:string,reviewer:string){
    const parts=albums[i];
    const dst:Record<string,unknown>={chat_id:d.telegram_chat_id};
    if(Number(d.telegram_thread_id)>0)dst.message_thread_id=d.telegram_thread_id;
+   let telegramAccepted=false;
    try{
     // Original Telegram photo IDs: no redrawing, no cropping risk, no image blobs persisted.
     const caption=(x:any)=>"🧾 "+val(x.invoice_no)+" • "+val(x.invoice_date);
     let result:any;
     if(parts.length===1)result=await tg("sendPhoto",{...dst,photo:parts[0].telegram_file_id,caption:caption(parts[0])});
     else result=await tg("sendMediaGroup",{...dst,media:parts.map((x:any)=>({type:"photo",media:x.telegram_file_id,caption:caption(x)}))});
+    telegramAccepted=true;
     const mids=(Array.isArray(result)?result:[result]).map((x:any)=>x?.message_id).filter((x:any)=>Number.isSafeInteger(x));
     const {error:okError}=await client.from("bb_invoice_photo_delivery_albums")
       .update({status:"sent",telegram_message_ids:mids,updated_at:new Date().toISOString()})
@@ -121,7 +123,7 @@ async function deliverBatch(batchId:string,reviewer:string){
     failed++;
     const message=e instanceof Error?e.message:"Unable to send album";
     // A transport timeout can be ambiguous: mark as sending, do not automatically duplicate.
-    const uncertain=/fetch failed|network|timeout|connection|internal server/i.test(message);
+    const uncertain=telegramAccepted||/fetch failed|network|timeout|connection|internal server/i.test(message);
     await client.from("bb_invoice_photo_delivery_albums").update({status:uncertain?"sending":"failed",error_text:message.slice(0,200),updated_at:new Date().toISOString()})
      .eq("batch_id",batchId).eq("destination_id",d.destination_id).eq("album_index",i);
     console.error("Invoice album delivery failed",message);
