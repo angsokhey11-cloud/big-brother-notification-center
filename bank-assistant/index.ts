@@ -507,7 +507,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      "📸 <b>BIG BROTHER — Invoice Review</b>\n\n"+
      "Tap below to open the one-photo review screen with <b>Invoice Date</b> and <b>Invoice Number</b> boxes, plus <b>Save &amp; Next</b>.\n\n"+
      "If you have already forwarded your chosen photos, tap below to review them. If no batch is pending, the Mini App offers a harmless layout preview.",
-     {reply_markup:{inline_keyboard:[[{text:"📸 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html"}}]]}}
+     {reply_markup:{inline_keyboard:[[{text:"📸 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=date-arrow-20261009"}}]]}}
    );
    return true;
  }
@@ -623,7 +623,7 @@ async function invoicePhotoPrivate(m:any):Promise<boolean>{
    const {error:markError}=await client.from("bb_invoice_photo_review_batches").update({review_notice_sent_at:new Date().toISOString()}).eq("batch_id",data.batch_id);
    if(markError)throw markError;
    await reply(m,"✅ <b>"+Number(data.count)+" invoice pictures ready for review</b>\nTap below, check both boxes for every invoice, then approve sending to your mapped destinations.",
-     {reply_markup:{inline_keyboard:[[{text:"📋 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html"}}]]}});
+     {reply_markup:{inline_keyboard:[[{text:"📋 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=date-arrow-20261009"}}]]}});
    return true;
  }
  return false;
