@@ -47,7 +47,7 @@ Deno.serve(async(req:Request)=>{
     if(id!==null&&!validId(id))return send({error:"Invalid route ID"},400);
     if(!label||label.length>120||!chatOk(chat)||!validThread(thread)||!Number.isSafeInteger(idle)||idle<15||idle>600||!validPrivateUser(reviewer))return send({error:"Source mapping requires a valid private Telegram reviewer User ID (5–20 digits)."},400);
     // Save sources inactive until the separate image processor is installed and tested.
-    const payload={route_label:label,source_chat_id:chat,source_thread_id:thread,idle_seconds:idle,reviewer_telegram_user_id:reviewer,active:false,updated_at:new Date().toISOString(),updated_by:user.id};
+    const payload={route_label:label,source_chat_id:chat,source_thread_id:thread,idle_seconds:idle,reviewer_telegram_user_id:reviewer,review_mode:"manual_all",active:false,updated_at:new Date().toISOString(),updated_by:user.id};
     const result=id===null
       ?await client.from("bb_invoice_photo_routes").insert(payload).select("route_id")
       :await client.from("bb_invoice_photo_routes").update(payload).eq("route_id",id).select("route_id");
