@@ -166,6 +166,57 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
  if(n.channel)result+="\nប្រភេទផ្ទេរ៖ "+escape(n.channel)+" (មិនមែនជាធនាគាររបស់អ្នកផ្ញើដែលបានផ្ទៀងផ្ទាត់)";
  return result;
 }
+// Offer a bank register review, never create any accounting record on detection.
+// This is limited to parsed bank notices posted in authorized Bank Assistant routes.
+async function newInvoiceRegisterPrompt(m:any,notice:ReturnType<typeof parseNotice>){
+ if(!notice.sender||!notice.currency||notice.amount===null||!Number.isFinite(notice.amount)||notice.amount<=0)return {};
+ const client=db(),chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),message=Number(m.message_id);
+ if(!chat||!Number.isSafeInteger(message)||message<1)return {};
+ const {error:insertError}=await client.from("bb_bank_new_invoice_review_drafts")
+  .upsert({source_chat_id:chat,source_thread_id:thread,source_message_id:message,
+    sender_name:notice.sender,transaction_id:notice.transactionId||null,amount:notice.amount,
+    currency:notice.currency,bank_channel:notice.channel||null},
+    {onConflict:"source_chat_id,source_thread_id,source_message_id",ignoreDuplicates:true});
+ if(insertError){console.warn("Bank New Invoice review candidate creation failed",insertError.code||"database");return {};}
+ const {data:entry,error:readError}=await client.from("bb_bank_new_invoice_review_drafts")
+  .select("draft_id,status").eq("source_chat_id",chat).eq("source_thread_id",thread).eq("source_message_id",message).maybeSingle();
+ if(readError||!entry||!["candidate","reviewing"].includes(entry.status))return {};
+ return {reply_markup:{inline_keyboard:[[{text:"🏦 New Invoice — Register Bank Payment",callback_data:"bbnew:"+entry.draft_id}]]}};
+}
+async function newInvoiceRegisterClick(cb:any,scope:RouteScope){
+ const data=val(cb.data),match=data.match(/^bbnew:([0-9a-f-]{36})$/i);
+ if(!match)return false;
+ const id=val(cb.from?.id);
+ if(!await allowed(id)){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Only authorized BIG BROTHER admins may review new-invoice bank registrations.",show_alert:true});
+  return true;
+ }
+ const source=cb.message;
+ if(!source?.chat?.id){await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Bank notice no longer available.",show_alert:true});return true;}
+ const {data:claimed,error}=await db().rpc("bb_bank_new_invoice_claim",{
+  p_draft_id:match[1],p_user:id,p_chat:val(source.chat.id),p_thread:Number(source.message_thread_id||0)
+ });
+ if(error||claimed!==true){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"This bank notice was already claimed or expired. Do not register it again.",show_alert:true});
+  return true;
+ }
+ const webUrl="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-new-invoice-review.html?draft="+encodeURIComponent(match[1]);
+ try{
+  const sent=await tg("sendMessage",{chat_id:id,text:
+   "🏦 <b>BIG BROTHER — New Invoice Bank Register</b>\n\n"+
+   "Open the private review. Confirm the customer, transaction, and payer. If that customer has no saved payer, choose <b>Add Bank Payer</b> to save it to the Customer Bank Directory first.\n\n"+
+   "⚠️ Only for a <b>NEW Invoice Generator invoice</b>. Do not register an A/R or unrelated transfer.\n"+
+   "No bank transaction or invoice has been changed.",
+   parse_mode:"HTML",reply_markup:{inline_keyboard:[[{text:"📋 Review New Invoice Bank Register",web_app:{url:webUrl}}]]}});
+  if(sent?.ok===false)throw Error("Cannot send reviewer message");
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Private registration review sent. No bank registration has been created."});
+ }catch(_){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,
+    text:"Please start BIG BROTHER Bot in your private chat, then tap this button again.",show_alert:true});
+ }
+ return true;
+}
+
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
@@ -174,7 +225,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  if(identityError)throw identityError;
  const ids=(identityRows||[]).map((x:any)=>x.customer_id).filter(Boolean).slice(0,8);
 
- if(!ids.length)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.");
+ if(!ids.length)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.\n\n🏦 For a NEW Invoice Generator invoice, an admin can review and register this transfer privately.",await newInvoiceRegisterPrompt(m,notice));
 
  let peopleQuery=client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(scope.location_code)peopleQuery=peopleQuery.eq("location_code",scope.location_code);
@@ -205,7 +256,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  if(invoicesResult.error)throw invoicesResult.error;
 
  const people=(peopleResult.data||[]) as Customer[];
- if(!people.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។");
+ if(!people.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។",await newInvoiceRegisterPrompt(m,notice));
 
  const invoiceRows=(invoicesResult.data||[]) as (Invoice&{customer_id:string,invoice_date?:string})[];
  const invoiceByCustomer=new Map<string,Invoice[]>();
@@ -241,7 +292,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  }
 
  head+="\n\n<i>នេះគ្រាន់តែជាការសម្គាល់ និងការណែនាំប៉ុណ្ណោះ។ គ្មានការកែប្រែការទូទាត់ ឬវិក្កយបត្រឡើយ។</i>";
- return reply(m,head);
+ return reply(m,head+"\n\n🏦 New Invoice registration is admin-review-only. Do not use it for A/R or unrelated payments.",await newInvoiceRegisterPrompt(m,notice));
 }
 function whoIsName(text:string){
  const t=val(text).replace(/[?？!។.]+\s*$/u,"").trim();
@@ -726,7 +777,12 @@ Deno.serve(async(req:Request)=>{
       }
     }
   }
-  if(u.callback_query){const scope=await bankScope(u.callback_query.message);if(scope&&await scopeAllows({from:u.callback_query.from},scope))await callback(u.callback_query);}
+  if(u.callback_query){
+    const scope=await bankScope(u.callback_query.message);
+    if(scope&&await scopeAllows({from:u.callback_query.from},scope)){
+      if(!await newInvoiceRegisterClick(u.callback_query,scope))await callback(u.callback_query);
+    }
+  }
   return Response.json({ok:true});
  }catch(e){console.error("Incoming Telegram handling failed", e instanceof Error?e.name:"error");return Response.json({ok:false},{status:500});}
 });
