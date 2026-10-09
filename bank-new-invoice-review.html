@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BIG BROTHER — New Invoice Bank Review</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{font-family:Inter,system-ui,Arial,"Noto Sans Khmer",sans-serif;background:#09182b;color:#ecf6ff;font-size:15px}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:690px;margin:0 auto;padding:17px 15px 60px}
+.tag{font-size:12px;letter-spacing:.12em;font-weight:800;color:#72c7ff}
+h1{font-size:23px;margin:14px 0 5px}h2{font-size:19px;margin:3px 0 13px}
+p{color:#a8c1dc;line-height:1.55}section,.card{background:#11243b;border:1px solid #31516c;border-radius:15px;padding:15px;margin-top:15px}
+.small{font-size:12px;color:#b3c8df}.warn{color:#ffc987}.ok{color:#7ee3bf}
+label{display:block;font-weight:650;margin:13px 0 7px}
+input,select{width:100%;padding:13px;background:#071b2f;border:1px solid #426482;border-radius:10px;color:white;font:inherit;min-height:48px}
+input:focus,select:focus{outline:2px solid #67c0ff}
+button{font:inherit;font-weight:750;color:#071929;background:#52adf5;padding:12px 16px;border:none;border-radius:11px;min-height:47px;cursor:pointer}
+button.secondary{background:#304760;color:#f4f8ff}
+button:disabled{opacity:.48;cursor:not-allowed}
+button.wide{width:100%;margin-top:15px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row>*{flex:1}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.hide{display:none!important}
+.notice{border:1px solid #416383;border-radius:11px;padding:13px;background:#0c1e32;color:#d3e7fc;line-height:1.55}
+.notice.error{border-color:#ac6166;color:#ffbdc3}
+.checkbox{display:flex;gap:12px;align-items:flex-start;margin:16px 0}
+.checkbox input{width:21px;min-height:0;height:21px;flex-shrink:0;margin-top:2px}
+.checkbox label{margin:0;font-weight:550}
+select option{background:#0c2036}
+dialog{border:1px solid #446985;border-radius:17px;padding:0;background:#122a45;color:#f0f7ff;width:min(95vw,550px);max-height:88vh;overflow:auto}
+dialog::backdrop{background:rgba(0,9,22,.82)}
+dialog .inside{padding:19px}
+.code{font-family:ui-monospace,monospace;overflow-wrap:anywhere}
+hr{border:0;border-top:1px solid #344b66;margin:16px 0}
+@media(max-width:500px){.grid{grid-template-columns:1fr}.wrap{padding:12px 11px 40px}}
+</style></head><body><main class="wrap">
+<div class="tag">🏦 BIG BROTHER · PRIVATE BANK REGISTER</div>
+<h1>New Invoice Bank Payment</h1>
+<p>Use this only for a new sale in Invoice Generator. A/R collections and unrelated payments must stay outside this workflow.</p>
+<div id="alert" class="notice hide" role="status" aria-live="polite"></div>
+<section id="loading">Checking Telegram and administrator access…</section>
+<section id="login" class="hide">
+ <h2>🔒 Administrator sign-in</h2>
+ <p>Use your BIG BROTHER DEV administrator login. Telegram alone cannot register payments or save the Bank Directory.</p>
+ <form id="loginForm">
+ <label for="email">Admin email</label><input id="email" type="email" autocomplete="username" required>
+ <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required>
+ <button class="wide" type="submit">Sign in &amp; Review</button>
+ </form>
+</section>
+<section id="review" class="hide">
+ <h2>1. Confirm bank notice</h2>
+ <div id="notice" class="notice"></div>
+ <p class="small">The bank notice suggests the values. Verify all details before any registration.</p>
+ <form id="registerForm">
+  <label for="customerSearch">Find customer</label>
+  <input id="customerSearch" type="search" placeholder="Search name or customer ID">
+  <label for="customer">Customer for NEW invoice</label>
+  <select id="customer" required><option value="">Select customer</option></select>
+  <div id="suggestion" class="small"></div>
+  <div id="payerArea" class="hide">
+   <label for="payer">Saved bank payer identity</label>
+   <select id="payer" required><option value="">Select saved payer</option></select>
+   <div id="missingPayer" class="notice warn hide" style="margin-top:12px">No saved payer for this customer. Add the payer to the Customer Bank Directory before registering.</div>
+   <button id="addPayer" class="secondary wide" type="button">+ Register Bank Payer for Customer</button>
+  </div>
+  <div class="grid">
+   <div><label for="transaction">Transaction ID</label><input id="transaction" maxlength="160" autocomplete="off" required></div>
+   <div><label for="received">Received Date</label><input id="received" type="date" required></div>
+   <div><label for="amount">Actual Bank Amount</label><input id="amount" type="number" min="0.0001" step="0.0001" required></div>
+   <div><label for="currency">Actual Currency</label><select id="currency" required><option>USD</option><option>KHR</option></select></div>
+   <div><label for="invoiceCurrency">New Invoice Currency</label><select id="invoiceCurrency" required><option>USD</option><option>KHR</option></select></div>
+   <div id="rateArea" class="hide"><label for="rate">KHR per USD Exchange Rate</label><input id="rate" type="number" min="1.000001" step="0.0001" placeholder="e.g. 4020"></div>
+  </div>
+  <label for="bankLabel">Receiving Bank / Channel (optional)</label>
+  <input id="bankLabel" maxlength="120" placeholder="e.g. ABA">
+  <div class="checkbox"><input type="checkbox" id="newInvoiceOnly" required>
+   <label for="newInvoiceOnly">I confirm this payment is specifically for a <strong>NEW invoice created in BIG BROTHER Invoice Generator</strong>. It is NOT an A/R collection, an old invoice settlement, or another payment.</label>
+  </div>
+  <div class="notice">Final confirmation creates an <strong>AVAILABLE</strong> Bank Register entry only. It does not mark an invoice paid. Invoice Generator will consume this registration later.</div>
+  <button id="register" type="submit" class="wide">✅ Confirm &amp; Register for New Invoice</button>
+  <button id="ignore" type="button" class="secondary wide">Leave This Transfer Alone</button>
+ </form>
+</section>
+<section id="complete" class="hide">
+ <h2>✅ Bank registration saved</h2>
+ <p id="successText"></p>
+ <p class="ok">Status: AVAILABLE for Invoice Generator. No A/R payment or invoice was changed.</p>
+</section>
+<dialog id="bankPopup">
+ <div class="inside">
+  <h2>🏦 Register Bank Payer</h2>
+  <p class="small">Save the customer's new payer to the same Customer Bank Directory as the manual register. This action does not register the bank transaction.</p>
+  <form id="bankForm">
+    <div id="bankCustomer" class="notice"></div>
+    <label for="bankName">Bank Name</label><input id="bankName" maxlength="140" placeholder="Bank name" required minlength="2">
+    <label for="holder">Account Holder / Payer Name</label><input id="holder" maxlength="160" required minlength="2">
+    <label for="accountNumber">Account Number (optional)</label><input id="accountNumber" maxlength="120" autocomplete="off">
+    <label for="aliases">Alternative Payer Names (optional, comma-separated)</label><input id="aliases" maxlength="600" placeholder="Other spellings of the payer name">
+    <div class="row" style="margin-top:17px">
+      <button type="button" class="secondary" id="cancelBank">Cancel</button>
+      <button id="saveBank" type="submit">Save to Bank Directory</button>
+    </div>
+  </form>
+ </div>
+</dialog>
+<p class="small">Secure private approval · Existing Bank Directory and Bank Register rules · Duplicate transaction protection · No automatic A/R collection</p>
+</main>
+<script>
+(()=>{
+"use strict";
+const tg=window.Telegram?.WebApp,initData=tg?.initData||"";
+tg?.ready?.();tg?.expand?.();
+const endpoint="https://sjfhlaclgmkwwofzstok.supabase.co";
+const api=endpoint+"/functions/v1/bb-bank-new-invoice-review";
+const key="sb_publishable_w762jR65CWwlO30fKQsYOw_6L9grx8S";
+const sessionKey="BB_BANK_NEW_INVOICE_ADMIN_SESSION";
+const id=new URLSearchParams(location.search).get("draft")||"";
+const el=(name)=>document.getElementById(name);
+const show=(name)=>["loading","login","review","complete"].forEach(x=>el(x).classList.toggle("hide",x!==name));
+let session=null,draft=null,customers=[],identities=[],suggested=[],busy=false,autoPopupCustomer="";
+const safe=(x)=>String(x??"");
+const clean=(x)=>safe(x).trim();
+function error(message){el("alert").textContent=message;el("alert").className="notice error";el("alert").classList.remove("hide")}
+function status(message){el("alert").textContent=message;el("alert").className="notice";el("alert").classList.remove("hide")}
+function clear(){el("alert").classList.add("hide")}
+function money(value){const n=Number(value);return Number.isFinite(n)?n.toLocaleString("en-US",{maximumFractionDigits:4}):safe(value)}
+function today(){return new Date(Date.now()+7*3600000).toISOString().slice(0,10)}
+function loggedSession(){try{return JSON.parse(localStorage.getItem(sessionKey)||"null")}catch{return null}}
+function storeSession(value){
+ session=value;if(value?.expires_in&&!value.expires_at)value.expires_at=Math.floor(Date.now()/1000)+Number(value.expires_in);
+ try{localStorage.setItem(sessionKey,JSON.stringify(value))}catch(_){}
+}
+function signOut(){session=null;try{localStorage.removeItem(sessionKey)}catch(_){}}
+async function responseJson(res){const payload=await res.json().catch(()=>({}));if(!res.ok)throw Error(payload.msg||payload.message||payload.error_description||payload.error||"Request failed ("+res.status+")");return payload}
+async function refresh(){
+ if(!session?.refresh_token)throw Error("Please sign in again.");
+ const res=await fetch(endpoint+"/auth/v1/token?grant_type=refresh_token",{
+  method:"POST",headers:{apikey:key,"content-type":"application/json"},
+  body:JSON.stringify({refresh_token:session.refresh_token})
+ });
+ const newSession=await responseJson(res);storeSession(newSession);
+}
+async function ensureSession(){
+ if(!session)session=loggedSession();
+ if(!session?.access_token)throw Error("Administrator login required");
+ if(session.expires_at&&Number(session.expires_at)<Math.floor(Date.now()/1000)+40)await refresh();
+ return session.access_token;
+}
+async function reviewApi(action,additional={}){
+ const token=await ensureSession();
+ const res=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},
+  body:JSON.stringify({action,init_data:initData,session_jwt:token,draft_id:id,...additional})});
+ return responseJson(res);
+}
+async function rpc(name,args={}){
+ let token=await ensureSession();
+ const request=(jwt)=>fetch(endpoint+"/rest/v1/rpc/"+name,{method:"POST",
+ headers:{"content-type":"application/json",apikey:key,authorization:"Bearer "+jwt},
+ body:JSON.stringify(args)});
+ let result=await request(token);
+ if(result.status===401){await refresh();token=await ensureSession();result=await request(token)}
+ return responseJson(result);
+}
+async function signIn(email,password){
+ const res=await fetch(endpoint+"/auth/v1/token?grant_type=password",{
+ method:"POST",headers:{apikey:key,"content-type":"application/json"},
+ body:JSON.stringify({email,password})});
+ storeSession(await responseJson(res));
+}
+function lock(on){busy=on;for(const name of ["register","ignore","saveBank","addPayer"]){el(name).disabled=on}}
+function customerOptions(){
+ const term=clean(el("customerSearch").value).toLowerCase();
+ const chosen=el("customer").value;
+ el("customer").replaceChildren(new Option("Select customer",""));
+ for(const c of customers){
+  const title=safe(c.customer_name||c.customer_id)+" — "+c.customer_id;
+  if(term&&!title.toLowerCase().includes(term)&&c.customer_id!==chosen)continue;
+  el("customer").add(new Option(title,c.customer_id));
+ }
+ if(customers.some(c=>c.customer_id===chosen))el("customer").value=chosen;
+}
+function identityName(x){return safe(x.account_holder_name)+" · "+safe(x.bank_name)+(x.account_number?" · "+String(x.account_number).slice(-4):"")}
+function normalized(x){return clean(x).toLowerCase().replace(/[.,\-_]/g," ").replace(/\s+/g," ")}
+function populatePayers(){
+ const customer=el("customer").value;
+ el("payerArea").classList.toggle("hide",!customer);
+ if(!customer)return;
+ const relevant=identities.filter(x=>x.customer_id===customer&&x.active===true);
+ const old=el("payer").value;
+ el("payer").replaceChildren(new Option("Select payer bank identity",""));
+ for(const x of relevant)el("payer").add(new Option(identityName(x),String(x.identity_id)));
+ const matched=relevant.find(x=>normalized(x.account_holder_name)===normalized(draft?.sender_name)
+  ||(x.alternative_names||[]).some(a=>normalized(a)===normalized(draft?.sender_name)));
+ if(matched)el("payer").value=String(matched.identity_id);
+ else if(relevant.some(x=>String(x.identity_id)===old))el("payer").value=old;
+ else if(relevant.length===1)el("payer").value=String(relevant[0].identity_id);
+ el("missingPayer").classList.toggle("hide",relevant.length!==0);
+ el("suggestion").textContent=suggested.includes(customer)?"✓ Customer matches the bank payer name in our directory.":"Confirm that this is the right customer.";
+ // If customer has no bank identities, launch the same new-payer popup automatically once.
+ if(relevant.length===0&&autoPopupCustomer!==customer){
+  autoPopupCustomer=customer;openPopup();
+ }
+}
+function openPopup(){
+ if(!el("customer").value){error("Choose the customer first.");return}
+ const customer=customers.find(x=>x.customer_id===el("customer").value);
+ el("bankCustomer").textContent="Customer: "+safe(customer?.customer_name)+" ("+el("customer").value+")";
+ el("bankName").value="";
+ el("holder").value=clean(draft?.sender_name);
+ el("accountNumber").value="";
+ el("aliases").value="";
+ el("bankPopup").showModal();
+ el("bankName").focus();
+}
+function displayNotice(){
+ const box=el("notice");box.replaceChildren();
+ const lines=[
+  ["Payer from notification",draft.sender_name||"Not recognized"],
+  ["Bank amount",money(draft.amount)+" "+safe(draft.currency)],
+  ["Transaction ID",draft.transaction_id||"Missing — enter manually"],
+  ["Channel (not verified bank name)",draft.bank_channel||"Unknown"]
+ ];
+ for(const [label,value] of lines){
+  const span=document.createElement("div"),strong=document.createElement("strong");
+  strong.textContent=label+": ";span.append(strong,document.createTextNode(value));box.append(span);
+ }
+ el("transaction").value=clean(draft.transaction_id).toUpperCase();
+ el("amount").value=draft.amount||"";
+ el("currency").value=draft.currency||"USD";
+ el("invoiceCurrency").value=el("currency").value;
+ el("received").value=draft.received_date||today();
+ updateRate();
+}
+function updateRate(){
+ const different=el("currency").value!==el("invoiceCurrency").value;
+ el("rateArea").classList.toggle("hide",!different);
+ el("rate").required=different;
+ if(!different)el("rate").value="";
+}
+async function load(){
+ if(!initData){error("Open this private review using the Telegram bot button, not an ordinary browser link.");show("loading");return}
+ if(!/^[0-9a-f-]{36}$/i.test(id)){error("Missing bank review link. Tap the new-invoice button on a bank notification.");show("loading");return}
+ try{
+  session=loggedSession();
+  if(!session){show("login");return}
+  const out=await reviewApi("load");
+  if(out.registered){
+   el("successText").textContent="Transaction "+out.transaction_id+" has already been registered.";
+   show("complete");return;
+  }
+  draft=out.draft;suggested=out.suggested_customer_ids||[];
+  const [found,existing]=await Promise.all([rpc("bb_bank_register_customers"),rpc("bb_customer_bank_identity_list")]);
+  customers=Array.isArray(found)?found:[];identities=Array.isArray(existing)?existing:[];
+  displayNotice();customerOptions();
+  if(suggested.length===1&&customers.some(x=>x.customer_id===suggested[0]))el("customer").value=suggested[0];
+  show("review");populatePayers();clear();
+ }catch(e){
+  if(/session|login|sign in|Unauthorized|jwt|administrator/i.test(e.message)){
+   signOut();show("login");error(e.message);
+  }else{show("loading");error(e.message)}
+ }
+}
+el("loginForm").onsubmit=async(e)=>{
+ e.preventDefault();
+ const button=el("loginForm").querySelector("button");button.disabled=true;
+ try{await signIn(clean(el("email").value),el("password").value);el("password").value="";await load()}
+ catch(err){error(err.message)}
+ finally{button.disabled=false}
+};
+el("customerSearch").oninput=customerOptions;
+el("customer").onchange=populatePayers;
+el("addPayer").onclick=openPopup;
+el("cancelBank").onclick=()=>el("bankPopup").close();
+el("currency").onchange=updateRate;el("invoiceCurrency").onchange=updateRate;
+el("bankForm").onsubmit=async(e)=>{
+ e.preventDefault();if(busy)return;
+ const customer=el("customer").value;
+ if(!customer){error("Select the customer before saving a payer.");return}
+ lock(true);
+ try{
+  const names=clean(el("aliases").value).split(",").map(clean).filter(Boolean).slice(0,12);
+  const bank=clean(el("bankName").value),holder=clean(el("holder").value);
+  if(bank.length<2||holder.length<2)throw Error("Enter bank name and account holder.");
+  const payerId=await rpc("bb_customer_bank_identity_save",{
+    p_customer_id:customer,p_bank_name:bank,p_holder_name:holder,
+    p_account_number:clean(el("accountNumber").value)||null,p_alternative_names:names,p_identity_id:null
+  });
+  const updated=await rpc("bb_customer_bank_identity_list");
+  identities=Array.isArray(updated)?updated:[];
+  el("bankPopup").close();populatePayers();
+  el("payer").value=String(payerId);
+  status("✅ Payer saved to Customer Bank Directory. Review the transfer below before registering it.");
+ }catch(e){error(e.message)}
+ finally{lock(false)}
+};
+el("registerForm").onsubmit=async(e)=>{
+ e.preventDefault();if(busy)return;
+ if(!el("registerForm").reportValidity())return;
+ const cid=el("customer").value,pid=Number(el("payer").value),tid=clean(el("transaction").value).toUpperCase();
+ const actualAmount=Number(el("amount").value),actualCur=el("currency").value;
+ const invCur=el("invoiceCurrency").value,rate=actualCur===invCur?1:Number(el("rate").value);
+ if(!cid||!Number.isSafeInteger(pid)||pid<1)throw error("Confirm an existing payer or save a new one to Customer Bank Directory.");
+ if(!tid||actualAmount<=0||!Number.isFinite(actualAmount))return error("Check the transaction ID and actual bank amount.");
+ if(!Number.isFinite(rate)||rate<=0||(actualCur!==invCur&&rate<=1))return error("Enter a valid KHR per USD exchange rate.");
+ const equivalent=actualCur===invCur?actualAmount:actualCur==="KHR"?actualAmount/rate:actualAmount*rate;
+ const found=customers.find(x=>x.customer_id===cid);
+ if(!confirm("REGISTER NEW INVOICE BANK PAYMENT?\n\nCustomer: "+safe(found?.customer_name)+"\nTransaction ID: "+tid+
+   "\nAmount: "+actualAmount+" "+actualCur+"\nInvoice currency: "+invCur+
+   (actualCur!==invCur?"\nExchange rate: "+rate:"")+
+   "\n\nNo A/R collection or invoice payment will be created."))return;
+ lock(true);clear();
+ try{
+  const result=await rpc("bb_bank_register_invoice_tx_v4",{
+    p_customer_id:cid,p_transaction_id:tid,p_amount:actualAmount,p_currency:actualCur,
+    p_invoice_currency:invCur,p_exchange_rate:rate,p_received_date:el("received").value,
+    p_payer_identity_id:pid,p_bank_name:clean(el("bankLabel").value)||null
+  });
+  if(!result?.success)throw Error("Existing Bank Register did not confirm success");
+  let saved=false;
+  try{
+   const done=await reviewApi("complete",{transaction_id:tid,customer_id:cid,payer_identity_id:pid});
+   saved=done.registered===true;
+  }catch(err){console.warn("Bank draft completion notice unavailable; protected bank registration succeeded.");}
+  el("successText").textContent="Transaction "+tid+" registered successfully for "+safe(found?.customer_name)+
+    ". "+(saved?"Private bot confirmation was requested.":"Registration succeeded, but the bot's review status could not update. Do NOT register the same transaction again.");
+  show("complete");clear();
+ }catch(err){error(err.message)}
+ finally{lock(false)}
+};
+el("ignore").onclick=async()=>{
+ if(busy||!confirm("Leave this transfer alone? It will NOT be registered for a new invoice."))return;
+ lock(true);
+ try{await reviewApi("discard");el("successText").textContent="Transfer left alone. No Bank Register transaction or invoice payment was created.";show("complete")}
+ catch(e){error(e.message)}
+ finally{lock(false)}
+};
+load();
+})();
+</script></body></html>
