@@ -106,7 +106,7 @@ async function render(){
  el("next").disabled=busy||(!preview&&batch?.status!=="awaiting_review");
  el("photoHint").textContent=preview?"DEMO ONLY — this is a placeholder, not a real invoice picture.":"Original Telegram photo. The fields only control sorting; they do not change writing on the original.";
  setPhoto(null);
- el("photoPlaceholder").textContent=preview?"📸\\nOriginal invoice picture appears here when a real task is ready.":"Loading original invoice picture…";
+ el("photoPlaceholder").textContent=preview?"📸\nOriginal invoice picture appears here when a real task is ready.":"Loading original invoice picture…";
  const t=++renderToken;
  if(preview)return;
  try{
@@ -118,7 +118,7 @@ async function render(){
 async function saveCurrent(){
  const n=el("number").value.trim(),d=el("date").value;
  if(!/^[0-9]{1,16}$/.test(n))throw Error("Enter the invoice number using digits only (keep all leading zeros).");
- if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(d)||Number.isNaN(Date.parse(d)))throw Error("Select a valid invoice date.");
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||Number.isNaN(Date.parse(d)))throw Error("Select a valid invoice date.");
  const item=items[index];
  if(!preview){
   const r=await call("save",{batch_id:batch.batch_id,queue_id:item.queue_id,invoice_no:n,invoice_date:d});
@@ -130,7 +130,13 @@ async function move(next){
  try{if(el("form").reportValidity())await saveCurrent();else return;
    if(next==="summary")showSummary();else{index=Math.max(0,Math.min(items.length-1,index+Number(next)));await render()}
  }catch(e){status(e.message,true)}
- finally{busy=false}
+ finally{
+  busy=false;
+  if(!el("review").classList.contains("hide")){
+   el("prev").disabled=index===0;
+   el("next").disabled=!preview&&batch?.status!=="awaiting_review";
+  }
+ }
 }
 function showSummary(){
  section("summary");clearStatus();
