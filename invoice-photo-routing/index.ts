@@ -43,11 +43,13 @@ Deno.serve(async(req:Request)=>{
   }
   if(action==="route_save"){
     const id=body.route_id==null||body.route_id===""?null:Number(body.route_id);
-    const label=clean(body.route_label),chat=clean(body.source_chat_id),thread=Number(body.source_thread_id||0),idle=Number(body.idle_seconds||60),reviewer=clean(body.reviewer_telegram_user_id);
+    const label=clean(body.route_label),idle=Number(body.idle_seconds||60),reviewer=clean(body.reviewer_telegram_user_id);
+    // Private account is the only authorized source; group/topic uploads must never be ingested.
+    const chat=reviewer,thread=0;
     if(id!==null&&!validId(id))return send({error:"Invalid route ID"},400);
-    if(!label||label.length>120||!chatOk(chat)||!validThread(thread)||!Number.isSafeInteger(idle)||idle<15||idle>600||!validPrivateUser(reviewer))return send({error:"Source mapping requires a valid private Telegram reviewer User ID (5–20 digits)."},400);
+    if(!label||label.length>120||!validPrivateUser(reviewer)||!Number.isSafeInteger(idle)||idle<15||idle>600)return send({error:"Private intake requires a valid Telegram reviewer User ID (5–20 digits) and a collection interval from 15 to 600 seconds."},400);
     // Save sources inactive until the separate image processor is installed and tested.
-    const payload={route_label:label,source_chat_id:chat,source_thread_id:thread,idle_seconds:idle,reviewer_telegram_user_id:reviewer,review_mode:"manual_all",active:false,updated_at:new Date().toISOString(),updated_by:user.id};
+    const payload={route_label:label,source_chat_id:chat,source_thread_id:thread,idle_seconds:idle,reviewer_telegram_user_id:reviewer,review_mode:"manual_all",intake_mode:"private_forward_only",active:false,updated_at:new Date().toISOString(),updated_by:user.id};
     const result=id===null
       ?await client.from("bb_invoice_photo_routes").insert(payload).select("route_id")
       :await client.from("bb_invoice_photo_routes").update(payload).eq("route_id",id).select("route_id");
@@ -69,7 +71,7 @@ Deno.serve(async(req:Request)=>{
     if(error||!route)return send({error:"Source mapping not found"},404);
     const reviewer=clean(route.reviewer_telegram_user_id);
     if(!validPrivateUser(reviewer))return send({error:"No private reviewer configured"},400);
-    await tg("sendMessage",{chat_id:reviewer,text:"✅ BIG BROTHER — Invoice Photo Organizer\nPrivate correction chat test successful for: "+route.route_label+"\nWhen an invoice is unclear, only this private chat will receive the verification question.\nNo invoice or accounting records were sent."});
+    await tg("sendMessage",{chat_id:reviewer,text:"✅ BIG BROTHER — Invoice Photo Organizer\nPrivate intake/review chat test successful for: "+route.route_label+"\nWhen enabled, forward your chosen invoice pictures to the bot here. It will ask you to review EVERY invoice date and number before sending albums. Group pictures are never collected.\nNo invoice or accounting records were sent."});
     return send({ok:true});
   }
   if(action==="destination_save"){
