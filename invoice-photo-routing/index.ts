@@ -39,7 +39,7 @@ Deno.serve(async(req:Request)=>{
       client.from("bb_invoice_photo_queue").select("queue_id",{count:"exact",head:true})
     ]);
     if(routes.error||destinations.error||queue.error)throw Error("Could not load organizer routing");
-    return send({ok:true,routes:routes.data||[],destinations:destinations.data||[],queued:queue.count||0,processor_connected:false});
+    return send({ok:true,routes:routes.data||[],destinations:destinations.data||[],queued:queue.count||0,processor_connected:true,processing_mode:"original_images_no_autocrop"});
   }
   if(action==="route_save"){
     const id=body.route_id==null||body.route_id===""?null:Number(body.route_id);
@@ -56,6 +56,29 @@ Deno.serve(async(req:Request)=>{
     if(result.error)return send({error:"Unable to save source. Check if this group/topic is already mapped."},409);
     if(!result.data?.length)return send({error:"Source mapping not found"},404);
     return send({ok:true,route_id:result.data[0].route_id,activated:false});
+  }
+  if(action==="route_set_active"){
+    const id=Number(body.route_id),enabled=body.active===true;
+    if(!validId(id))return send({error:"Invalid private intake route"},400);
+    const {data:route,error:re}=await client.from("bb_invoice_photo_routes")
+      .select("route_id,reviewer_telegram_user_id,source_chat_id,source_thread_id,intake_mode,review_mode").eq("route_id",id).maybeSingle();
+    if(re||!route)return send({error:"Private intake route not found"},404);
+    const reviewer=clean(route.reviewer_telegram_user_id);
+    if(enabled){
+      if(!validPrivateUser(reviewer)||reviewer!==route.source_chat_id||Number(route.source_thread_id)!==0||
+        route.intake_mode!=="private_forward_only"||route.review_mode!=="manual_all")return send({error:"Only a manually reviewed private forwarding route may be enabled"},409);
+      const {data:approver}=await client.from("bb_telegram_assistant_admins").select("telegram_user_id").eq("telegram_user_id",reviewer).maybeSingle();
+      if(!approver)return send({error:"Private reviewer is not an authorized Telegram admin"},403);
+      const {data:targets,error:te}=await client.from("bb_invoice_photo_destinations")
+        .select("telegram_chat_id,telegram_thread_id").eq("route_id",id).eq("active",true);
+      if(te)return send({error:"Cannot validate mapped destinations"},500);
+      if(!targets?.some((d:any)=>clean(d.telegram_chat_id)===reviewer&&Number(d.telegram_thread_id)===0)||
+         !targets?.some((d:any)=>clean(d.telegram_chat_id).startsWith("-")))
+        return send({error:"Add BOTH your private chat and a group/topic delivery destination before enabling"},409);
+    }
+    const {error:ue}=await client.from("bb_invoice_photo_routes").update({active:enabled,updated_at:new Date().toISOString(),updated_by:user.id}).eq("route_id",id);
+    if(ue)return send({error:"Could not update private intake state"},500);
+    return send({ok:true,active:enabled});
   }
   if(action==="route_delete"){
     const id=Number(body.route_id);
