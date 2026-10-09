@@ -14,6 +14,15 @@
 8. Send the exact same ordered albums to all configured **output** destinations: the chosen group/topic and the reviewer's private Telegram chat. Both must be configured; group is never the source. All source, reviewer and destination IDs come from DB mapping, never hardcoded.
 9. Keep only temporary Telegram photo references and review metadata (no image blobs in DB). After confirmed delivery to both destinations, delete temporary copies/references. For unsuccessful sends retry within the expiry window without duplicating successfully completed destinations. Pending reviews expire after 24 hours, with eventual cleanup and ideally prior reminder. Telegram-managed media remains in Telegram.
 
+## Connected private reviewer and routing diagnostics (09-Oct-2026)
+
+- Existing active Telegram administrator has an authorized private photo-organizer route in BIG BROTHER DEV. The route itself stays disabled until the image worker is implemented.
+- The route now has TWO active output mappings: one group/topic and the reviewer's own private chat. All IDs come from saved DB mappings; no hard-coded chat/user IDs.
+- Existing shared Telegram webhook (`bb-bank-assistant`, version 32) includes a strictly private `PHOTO` / `/photostatus` command that confirms the current caller is the mapped admin reviewer and reports output destination counts. It never posts routing status to group.
+- `/phototest` (private and administrator-only) sends an explicit harmless message to each enabled mapped destination and replies privately with individual successes/failures. This is a routing test, not an invoice-processing test.
+- `/start`, `ID`, and `/myid` continue showing the caller's own Telegram ID in their private chat.
+- The existing Bank Assistant group/topic handler, secret validation and transaction logic remain unchanged. Actual Telegram messages have not been end-to-end tested from this conversation; ask reviewer to send `PHOTO` then `/phototest` directly to bot privately.
+
 ## Implemented configuration, schema and security
 
 - `invoice-photo-organizer.html` — Telegram Manager sidebar mapping editor. Private reviewer/forwarding source and destinations (including output group/topic and private chat); test private reviewer/destination.
