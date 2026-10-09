@@ -57,7 +57,8 @@ async function ensureTelegramCommands(){
    {command:"help",description:"Show the private bot command menu"},
    {command:"myid",description:"Show your Telegram User ID"},
    {command:"photo",description:"Check Invoice Photo Organizer mapping"},
-   {command:"phototest",description:"Test group and private message delivery"}
+   {command:"phototest",description:"Test group and private message delivery"},
+   {command:"review",description:"Open picture review with date and number boxes"}
   ]}
  ];
  const results=await Promise.all(definitions.map(d=>tg("setMyCommands",d)));
@@ -468,7 +469,8 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  const status=/^(?:\/(?:photo|photostatus)(?:@\w+)?|photo|photo status|organizer)$/i.test(t);
  const test=/^(?:\/phototest(?:@\w+)?|photo test)$/i.test(t);
  const help=/^\/help(?:@\w+)?$/i.test(t);
- if(!start&&!myid&&!status&&!test&&!help)return false;
+ const review=/^\/review(?:@\w+)?$/i.test(t);
+ if(!start&&!myid&&!status&&!test&&!help&&!review)return false;
  if(help){
    await reply(m,
      "🤖 <b>BIG BROTHER — Private Bot Commands</b>\n\n"+
@@ -476,6 +478,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      "🪪 <code>/myid</code> — Show my Telegram User ID\n"+
      "📸 <code>/photo</code> — Check private reviewer and output mappings\n"+
      "🧪 <code>/phototest</code> — Send harmless tests to mapped destinations\n"+
+     "📋 <code>/review</code> — Open photo review with two input boxes\n"+
      "❓ <code>/help</code> — Show this list\n\n"+
      "Note: Photo mapping and delivery tests require authorized admin access. Invoice processing is not active yet."
    );
@@ -493,6 +496,15 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  // Never reveal routing details or trigger delivery tests for unapproved Telegram accounts.
  if(!await allowed(id)){
    await reply(m,"🔒 Private Invoice Photo Organizer settings are available only to an authorized BIG BROTHER Telegram administrator.");
+   return true;
+ }
+ if(review){
+   await reply(m,
+     "📸 <b>BIG BROTHER — Invoice Review</b>\n\n"+
+     "Tap below to open the one-photo review screen with <b>Invoice Date</b> and <b>Invoice Number</b> boxes, plus <b>Save &amp; Next</b>.\n\n"+
+     "⚠️ No live forwarded-photo collection or album delivery yet. The Mini App includes a harmless layout preview.",
+     {reply_markup:{inline_keyboard:[[{text:"📸 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html"}}]]}}
+   );
    return true;
  }
  const client=db();
