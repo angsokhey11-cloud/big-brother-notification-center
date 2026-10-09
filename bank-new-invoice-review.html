@@ -299,7 +299,7 @@ el("registerForm").onsubmit=async(e)=>{
  const cid=el("customer").value,pid=Number(el("payer").value),tid=clean(el("transaction").value).toUpperCase();
  const actualAmount=Number(el("amount").value),actualCur=el("currency").value;
  const invCur=el("invoiceCurrency").value,rate=actualCur===invCur?1:Number(el("rate").value);
- if(!cid||!Number.isSafeInteger(pid)||pid<1)throw error("Confirm an existing payer or save a new one to Customer Bank Directory.");
+ if(!cid||!Number.isSafeInteger(pid)||pid<1)return error("Confirm an existing payer or save a new one to Customer Bank Directory.");
  if(!tid||actualAmount<=0||!Number.isFinite(actualAmount))return error("Check the transaction ID and actual bank amount.");
  if(!Number.isFinite(rate)||rate<=0||(actualCur!==invCur&&rate<=1))return error("Enter a valid KHR per USD exchange rate.");
  const equivalent=actualCur===invCur?actualAmount:actualCur==="KHR"?actualAmount/rate:actualAmount*rate;
