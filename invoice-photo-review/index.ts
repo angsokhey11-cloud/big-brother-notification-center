@@ -37,11 +37,26 @@ async function tgFile(fileId:string):Promise<Response>{
  if(Number(j.result.file_size||0)>20_000_000)throw Error("Picture is too large");
  const file=await fetch("https://api.telegram.org/file/bot"+token+"/"+j.result.file_path);
  if(!file.ok)throw Error("Unable to retrieve Telegram picture");
- const mime=file.headers.get("content-type")||"image/jpeg";
- if(!mime.startsWith("image/"))throw Error("Not an image");
+ // Telegram's file endpoint can return application/octet-stream for real photos.
+ // Determine the media type from verified image bytes, never an unreliable HTTP label.
+ const declaredSize=Number(file.headers.get("content-length")||0);
+ if(declaredSize>20_000_000)throw Error("Picture is too large");
  const content=await file.arrayBuffer();
- if(content.byteLength>20_000_000)throw Error("Picture is too large");
- return new Response(content,{status:200,headers:{...cors,"content-type":mime,"content-length":String(content.byteLength)}});
+ if(content.byteLength===0||content.byteLength>20_000_000)throw Error("Picture is too large or empty");
+ const b=new Uint8Array(content);
+ let mime:string|null=null;
+ if(b.length>=3&&b[0]===0xff&&b[1]===0xd8&&b[2]===0xff)mime="image/jpeg";
+ else if(b.length>=8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4e&&b[3]===0x47&&b[4]===0x0d&&b[5]===0x0a&&b[6]===0x1a&&b[7]===0x0a)mime="image/png";
+ else if(b.length>=12&&b[0]===0x52&&b[1]===0x49&&b[2]===0x46&&b[3]===0x46&&b[8]===0x57&&b[9]===0x45&&b[10]===0x42&&b[11]===0x50)mime="image/webp";
+ if(!mime){
+  // Log metadata only, never original photo pixels, file ID, token, or URL.
+  console.warn("Invoice photo binary signature unsupported",{
+   declaredType:(file.headers.get("content-type")||"unknown").slice(0,80),
+   bytes:b.length
+  });
+  throw Error("Telegram returned unsupported image data. Please contact admin.");
+ }
+ return new Response(content,{status:200,headers:{...cors,"content-type":mime,"content-length":String(content.byteLength),"x-content-type-options":"nosniff"}});
 }
 const botToken=()=>Deno.env.get("TELEGRAM_BOT_TOKEN")||"";
 const tg=async(method:string,data:Record<string,unknown>)=>{
