@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BIG BROTHER — Bank Assistant Personal Review Routing</title>
+<style>
+:root{font:15px Inter,Arial,sans-serif;color:#eaf4ff;background:#08182b}*{box-sizing:border-box}body{margin:0}
+main{max-width:940px;margin:auto;padding:22px 16px}h1{font-size:25px;margin:12px 0}p{line-height:1.6;color:#b6c9dc}
+.card{background:#12253e;border:1px solid #31516d;border-radius:15px;padding:16px;margin:15px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:block;font-weight:650;margin:12px 0 7px}input{background:#09192c;color:#eef7ff;border:1px solid #4c6884;border-radius:9px;padding:12px;font:inherit;width:100%}
+button{background:#45a8f5;color:#081a2c;border:0;border-radius:9px;padding:12px 16px;font:inherit;font-weight:750;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}
+.route{border-top:1px solid #375069;padding:13px 0}small{color:#aec4d9}.notice{white-space:pre-wrap;border:1px solid #4d657b;border-radius:9px;padding:11px;color:#d1e8fa}
+input[type=checkbox]{width:auto}.hide{display:none!important}@media(max-width:600px){.grid{grid-template-columns:1fr}}
+</style></head><body><main>
+<a href="./" style="color:#7ccaff">← Telegram Manager</a>
+<h1>🏦 Bank Assistant — Personal Review Routes</h1>
+<p>Map each Bank Assistant group/topic to one authorized personal Telegram account. The bot keeps answering transactions normally. Only <strong>/reviewtransaction</strong> creates a review task, delivered privately to that account.</p>
+<div class="card"><h3>Admin access</h3><p>Admin sign-in is required to change the route. No bank register or payment is changed here.</p>
+<div class="grid"><div><label>Email</label><input id="email" type="email" autocomplete="username"></div><div><label>Password</label><input id="password" type="password" autocomplete="current-password"></div></div>
+<button type="button" id="signin" style="margin-top:12px">Sign in</button>
+<button type="button" id="reload">Refresh bank routes</button>
+<div class="notice" id="status" style="margin-top:12px">Checking administrator access…</div></div>
+<div class="card"><h3>Mapped Bank Assistant topics</h3><div id="routes">Loading…</div></div>
+<p><small>To learn your personal Telegram User ID, open your private BIG BROTHER Bot chat and send /myid. The account must also be authorized as a Bank Assistant administrator. Route changes require confirmation. Missing routes never send private tasks to random accounts.</small></p>
+<script src="https://angsokhey11-cloud.github.io/big-brother-admin-work/supabase-admin-work-adapter.js"></script>
+<script>
+(()=>{
+"use strict";
+const el=x=>document.getElementById(x),adapter=window.BBAdminWorkAdapter;
+let routes=[];
+function info(message){el("status").textContent=message}
+function makeTag(tag,text){const v=document.createElement(tag);v.textContent=String(text||"");return v}
+function draw(){
+ el("routes").replaceChildren();
+ if(!routes.length){el("routes").append(makeTag("p","No active Bank Assistant topics were found."));return;}
+ for(const route of routes){
+  const div=makeTag("div","");div.className="route";
+  const title=makeTag("strong",(route.source_label||"Bank Assistant")+" · Topic "+route.source_thread_id);
+  const description=makeTag("p","Source chat: "+route.source_chat_id+" / Thread: "+route.source_thread_id);
+  const lbl=makeTag("label","Personal Telegram User ID");
+  const input=document.createElement("input");input.type="text";input.inputMode="numeric";input.pattern="[0-9]{5,20}";input.maxLength=20;
+  input.value=route.reviewer_telegram_user_id||"";input.placeholder="Private reviewer Telegram ID from /myid";
+  const toggle=document.createElement("input");toggle.type="checkbox";toggle.checked=Boolean(route.active);
+  const activate=makeTag("label"," Enable review delivery");activate.prepend(toggle);
+  const button=makeTag("button","Save Personal Route");
+  button.onclick=async()=>{
+   const id=input.value.trim();
+   if(!/^[0-9]{5,20}$/.test(id)){info("Enter a valid authorized Telegram User ID.");return;}
+   if(!confirm("Set personal review route for Bank Assistant topic "+route.source_thread_id+" to Telegram User ID "+id+"?"))return;
+   button.disabled=true;
+   try{await adapter.rpc("bb_bank_review_route_save",{p_chat:route.source_chat_id,p_thread:Number(route.source_thread_id),p_reviewer:id,p_active:toggle.checked});
+    info("✅ Personal review route saved. The bot will send on-demand bank review to that account.");
+    await reload();
+   }catch(e){info("❌ "+e.message)}finally{button.disabled=false}
+  };
+  div.append(title,description,lbl,input,activate,button);el("routes").append(div);
+ }
+}
+async function reload(){
+ try{
+  if(!adapter)throw Error("Admin work adapter did not load.");
+  await adapter.ensureSession();
+  routes=await adapter.rpc("bb_bank_review_route_list");
+  if(!Array.isArray(routes))throw Error("Route list unavailable");
+  draw();info("✅ Bank Assistant personal routes loaded. Only /reviewtransaction starts a review batch.");
+ }catch(e){info("🔒 "+e.message);el("routes").replaceChildren(makeTag("p","Sign in as a BIG BROTHER administrator to manage personal review routes."))}
+}
+el("signin").onclick=async()=>{
+ try{await adapter.signIn(el("email").value,el("password").value);el("password").value="";await reload()}
+ catch(e){info("❌ "+e.message)}
+};
+el("reload").onclick=reload;reload();
+})();
+</script></main></body></html>
