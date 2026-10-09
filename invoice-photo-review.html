@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BIG BROTHER — Invoice Review</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{font-family:Inter,system-ui,Arial,"Noto Sans Khmer",sans-serif;background:#08182b;color:#eff5ff;font-size:15px}
+*{box-sizing:border-box}body{margin:0;padding:0}button,input{font:inherit}
+.wrap{max-width:680px;margin:auto;padding:16px 16px max(32px,env(safe-area-inset-bottom))}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.logo{font-size:12px;letter-spacing:.13em;color:#6cc6ff;font-weight:800}
+.pill{padding:6px 9px;border:1px solid #315875;border-radius:99px;color:#bad6ef;font-size:12px}
+h1{font-size:24px;line-height:1.2;margin:12px 0 4px}p,.subtle{color:#aac0d6;line-height:1.5}
+.msg{background:#112945;border:1px solid #315677;padding:12px;border-radius:12px;margin:14px 0;white-space:pre-wrap}
+.msg.error{border-color:#a8545d;color:#ffc0c4}
+.card{background:#12243c;border:1px solid #294667;border-radius:17px;padding:14px;margin-top:14px}
+.row{display:flex;align-items:center;gap:12px;justify-content:space-between}
+.progress{height:8px;border-radius:99px;background:#2a3a51;overflow:hidden;margin:14px 0}
+.fill{height:100%;background:linear-gradient(90deg,#4db1ff,#6fddac);transition:width .2s}
+.preview{height:min(50vh,470px);min-height:230px;display:flex;align-items:center;justify-content:center;background:#081421;border:1px dashed #47617c;border-radius:12px;overflow:hidden;margin:10px 0 15px}
+.preview img{width:100%;height:100%;object-fit:contain}
+.preview .placeholder{color:#819bb6;text-align:center;padding:24px;line-height:1.7}
+label{display:block;margin:14px 0 7px;font-size:14px;font-weight:700}
+input{width:100%;border:1px solid #426182;background:#0a1b30;color:white;border-radius:12px;padding:13px 14px;min-height:50px}
+input:focus{outline:2px solid #6abfff;outline-offset:1px}
+.buttonrow{display:grid;grid-template-columns:1fr 1.5fr;gap:10px;margin-top:18px}
+button{border:none;border-radius:12px;font-weight:750;padding:14px 12px;cursor:pointer;min-height:50px}
+button:disabled{cursor:not-allowed;opacity:.42}
+.primary{background:#3da1f2;color:#071829}.secondary{background:#293f5b;color:#eaf4ff}
+.wide{width:100%;margin-top:12px}.hide{display:none!important}
+.summaryrow{border:1px solid #355272;border-radius:10px;padding:12px;margin-top:8px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.summaryrow strong{font-weight:800;letter-spacing:.02em}.summaryrow span{display:block;color:#9fb5ce;font-size:12px;margin-top:4px}
+.summaryrow button{padding:8px 12px;min-height:34px;background:#294a6a;color:#e6f3ff}
+kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
+.footer{font-size:12px;color:#83a3bf;margin-top:16px}
+[aria-live]{min-height:1em}
+</style></head>
+<body><main class="wrap">
+<div class="top"><span class="logo">📸 BIG BROTHER · INVOICE REVIEW</span><span class="pill" id="mode">Loading…</span></div>
+<h1>Review invoice pictures</h1>
+<p style="margin-top:0">One photo at a time. Enter the date and invoice number, then tap <strong>Save &amp; Next</strong>.</p>
+<div id="alert" class="msg hide" role="status" aria-live="polite"></div>
+<div id="loading" class="card">Checking your private Telegram review task…</div>
+<div id="empty" class="card hide">
+ <h2 style="margin:0 0 10px">No pending review</h2>
+ <p id="emptyText">Your selected invoice pictures will appear here after the bot prepares a task.</p>
+ <button id="demo" class="secondary wide">Preview how the review screen works</button>
+</div>
+<section id="review" class="hide">
+ <div class="card">
+  <div class="row"><strong id="counter">Picture 1 of 1</strong><span id="reviewCount" class="pill">0 confirmed</span></div>
+  <div class="progress"><div class="fill" id="bar" style="width:0%"></div></div>
+  <div class="preview"><div class="placeholder" id="photoPlaceholder">📷<br>Loading the original invoice picture…</div><img class="hide" id="photo" alt="Original invoice photo to review"/></div>
+  <p id="photoHint" class="subtle" style="margin:0;font-size:12px">Original picture only. The two fields below control sorting; they do not rewrite the invoice.</p>
+  <form id="form">
+   <label for="date">Invoice Date</label>
+   <input type="date" id="date" required>
+   <label for="number">Invoice Number</label>
+   <input id="number" type="text" inputmode="numeric" autocomplete="off" maxlength="16" pattern="[0-9]{1,16}" placeholder="e.g. 002351" required>
+   <div class="buttonrow"><button class="secondary" type="button" id="prev">← Previous</button><button class="primary" id="next" type="submit">Save &amp; Next →</button></div>
+  </form>
+ </div>
+ <button class="secondary wide" id="summaryButton">Review summary</button>
+</section>
+<section id="summary" class="card hide">
+ <div class="row"><h2 style="margin:0">Batch review summary</h2><span id="completeCount" class="pill"></span></div>
+ <p>Check all invoice dates and numbers. Tap Edit to return to any picture.</p>
+ <div id="summaryList"></div>
+ <p id="deliveryNotice" class="subtle">Delivery is not connected yet. This screen cannot send photos until the image-processing and album-delivery engine is verified.</p>
+ <button class="primary wide" id="approve" disabled>Approve &amp; Send (not active yet)</button>
+ <button class="secondary wide" id="backToReview">← Back to pictures</button>
+</section>
+<p class="footer">Private reviewer only · No OCR auto-approval · Temporary image references · No modification of original invoice details</p>
+</main>
+<script>
+(()=>{
+"use strict";
+const tg=window.Telegram?.WebApp,initData=tg?.initData||"";
+const api="https://sjfhlaclgmkwwofzstok.supabase.co/functions/v1/bb-invoice-photo-review";
+const el=id=>document.getElementById(id);
+let items=[],batch=null,index=0,preview=false,blobUrl=null,busy=false;
+tg?.ready?.();tg?.expand?.();
+const safe=(x)=>String(x??"");
+const status=(message,error=false)=>{el("alert").textContent=message;el("alert").className="msg"+(error?" error":"");el("alert").classList.remove("hide")};
+const clearStatus=()=>el("alert").classList.add("hide");
+function section(name){for(const id of ["loading","empty","review","summary"])el(id).classList.toggle("hide",id!==name)}
+async function call(action,args={},image=false){
+ const res=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,init_data:initData,...args})});
+ if(!res.ok){let msg;try{msg=(await res.json()).error}catch{}throw Error(msg||"Request failed. Please reopen the review from Telegram.");}
+ if(image)return await res.blob();
+ const data=await res.json();if(!data.ok)throw Error(data.error||"Request failed");return data;
+}
+function completed(){return items.filter(x=>x.review_state==="confirmed"&&x.invoice_no&&x.invoice_date).length}
+function setPhoto(src){if(blobUrl){URL.revokeObjectURL(blobUrl);blobUrl=null}if(src){blobUrl=src;el("photo").src=src;el("photo").classList.remove("hide");el("photoPlaceholder").classList.add("hide")}else{el("photo").classList.add("hide");el("photoPlaceholder").classList.remove("hide")}}
+let renderToken=0;
+async function render(){
+ if(!items.length){section("empty");return}
+ section("review");clearStatus();
+ const i=items[index];if(!i)return;
+ el("counter").textContent="Picture "+(index+1)+" of "+items.length;
+ el("reviewCount").textContent=completed()+" confirmed";
+ el("bar").style.width=Math.round(completed()/items.length*100)+"%";
+ el("date").value=i.invoice_date||"";
+ el("number").value=i.invoice_no||"";
+ el("prev").disabled=busy||index===0;
+ el("next").textContent=index===items.length-1?"Save & Review Summary →":"Save & Next →";
+ el("next").disabled=busy||(!preview&&batch?.status!=="awaiting_review");
+ el("photoHint").textContent=preview?"DEMO ONLY — this is a placeholder, not a real invoice picture.":"Original Telegram photo. The fields only control sorting; they do not change writing on the original.";
+ setPhoto(null);
+ el("photoPlaceholder").textContent=preview?"📸\\nOriginal invoice picture appears here when a real task is ready.":"Loading original invoice picture…";
+ const t=++renderToken;
+ if(preview)return;
+ try{
+  const file=await call("photo",{batch_id:batch.batch_id,queue_id:i.queue_id},true);
+  if(t!==renderToken)return;
+  setPhoto(URL.createObjectURL(file));
+ }catch(err){if(t===renderToken){el("photoPlaceholder").textContent="Could not load this photo. Try opening the review again.";status(err.message,true)}}
+}
+async function saveCurrent(){
+ const n=el("number").value.trim(),d=el("date").value;
+ if(!/^[0-9]{1,16}$/.test(n))throw Error("Enter the invoice number using digits only (keep all leading zeros).");
+ if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(d)||Number.isNaN(Date.parse(d)))throw Error("Select a valid invoice date.");
+ const item=items[index];
+ if(!preview){
+  const r=await call("save",{batch_id:batch.batch_id,queue_id:item.queue_id,invoice_no:n,invoice_date:d});
+  Object.assign(item,r.item);
+ }else Object.assign(item,{invoice_no:n,invoice_date:d,review_state:"confirmed"});
+}
+async function move(next){
+ if(busy)return;busy=true;
+ try{if(el("form").reportValidity())await saveCurrent();else return;
+   if(next==="summary")showSummary();else{index=Math.max(0,Math.min(items.length-1,index+Number(next)));await render()}
+ }catch(e){status(e.message,true)}
+ finally{busy=false}
+}
+function showSummary(){
+ section("summary");clearStatus();
+ const n=completed();el("completeCount").textContent=n+"/"+items.length+" checked";
+ const arr=[...items].sort((a,b)=>safe(a.invoice_date).localeCompare(safe(b.invoice_date))||
+  safe(a.invoice_no).localeCompare(safe(b.invoice_no),undefined,{numeric:true})||
+  Number(a.source_message_id||0)-Number(b.source_message_id||0));
+ el("summaryList").replaceChildren();
+ for(const i of arr){
+  const row=document.createElement("div");row.className="summaryrow";
+  const info=document.createElement("div");const strong=document.createElement("strong");
+  strong.textContent=i.invoice_no||"Not reviewed";const small=document.createElement("span");small.textContent=i.invoice_date||"Date missing";
+  info.append(strong,small);const edit=document.createElement("button");edit.type="button";edit.textContent="Edit";
+  edit.onclick=()=>{index=items.findIndex(x=>x===i);render()};
+  row.append(info,edit);el("summaryList").append(row);
+ }
+ el("deliveryNotice").textContent=preview
+  ?"UI preview only. Nothing is stored or sent. Automatic album delivery is not connected yet."
+  :(n===items.length?"All metadata reviewed. Album delivery is not connected yet, so approval is locked for safety.":"Complete every date and invoice number before approval. Album sending is not connected yet.");
+}
+el("form").onsubmit=async(e)=>{e.preventDefault();await move(index===items.length-1?"summary":1)};
+el("prev").onclick=async()=>{if(busy||index===0)return;const n=el("number").value.trim(),d=el("date").value;if(n&&d){await move(-1)}else{index--;await render()}};
+el("summaryButton").onclick=()=>showSummary();el("backToReview").onclick=()=>render();
+el("demo").onclick=()=>{
+ preview=true;batch={status:"awaiting_review"};items=[
+  {queue_id:1,source_message_id:1,invoice_no:"",invoice_date:"",review_state:"pending_review"},
+  {queue_id:2,source_message_id:2,invoice_no:"",invoice_date:"",review_state:"pending_review"},
+  {queue_id:3,source_message_id:3,invoice_no:"",invoice_date:"",review_state:"pending_review"}];
+ index=0;el("mode").textContent="Demo";render();
+};
+async function init(){
+ if(!initData){el("mode").textContent="Preview only";section("empty");el("emptyText").textContent="Open a review task using the button in BIG BROTHER Bot's private Telegram chat. You can also preview the two-box screen here, without saving or sending anything.";return}
+ try{
+  const out=await call("load");
+  if(out.empty||!out.items?.length){el("mode").textContent="No review task";section("empty");el("emptyText").textContent="No invoice pictures are awaiting review. The private forwarding/collection engine is still being built.";return}
+  batch=out.batch;items=out.items;index=items.findIndex(x=>x.review_state!=="confirmed");if(index<0)index=0;
+  el("mode").textContent=batch.status==="collecting"?"Collecting":"Private review";
+  await render();
+ }catch(e){el("mode").textContent="Unavailable";section("empty");el("emptyText").textContent="Unable to open the private task: "+e.message}
+}
+init();
+})();
+</script>
+</body></html>
