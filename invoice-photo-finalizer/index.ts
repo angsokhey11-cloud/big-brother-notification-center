@@ -34,7 +34,7 @@ Deno.serve(async(req:Request)=>{
        await tg("sendMessage",{
          chat_id:b.reviewer_telegram_user_id,
          text:"📸 BIG BROTHER — Invoice Photo Review\n\n"+Number(count||0)+" forwarded pictures are ready. Open the review screen, confirm each invoice number and date, then approve sending.\n\nNothing has been posted to the group yet.",
-         reply_markup:{inline_keyboard:[[{text:"📋 Review Pictures",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=date-arrow-20261009"}}]]}
+         reply_markup:{inline_keyboard:[[{text:"📋 Review Pictures",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=sticky-range-20261009"}}]]}
        });
        sent++;
      }catch(err){
