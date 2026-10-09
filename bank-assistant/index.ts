@@ -189,6 +189,58 @@ async function newInvoiceRegisterClick(cb:any,_scope:RouteScope){
  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Send /reviewtransaction in your Bank Assistant topic to get a private review batch.",show_alert:true});
  return true;
 }
+// Explicit trigger only: one private reviewer is assigned to every mapped group/topic.
+async function beginBankTransactionReview(m:any,scope:RouteScope|null){
+ const sender=val(m.from?.id),privateChat=m.chat?.type==="private"&&val(m.chat.id)===sender;
+ if(!await allowed(sender)){
+  await reply(m,"🔒 Only an authorized Bank Assistant administrator can request a private transaction review.");
+  return;
+ }
+ if(!privateChat&&!scope){
+  await reply(m,"🔒 Review is available only in a mapped Bank Assistant group/topic or your personal bot chat.");
+  return;
+ }
+ let reviewer=sender;
+ if(!privateChat){
+  const {data:mapping,error:mapError}=await db().from("bb_bank_review_personal_routes")
+   .select("reviewer_telegram_user_id").eq("source_chat_id",val(m.chat.id))
+   .eq("source_thread_id",Number(m.message_thread_id||0)).eq("active",true).maybeSingle();
+  if(mapError)throw mapError;
+  if(!mapping?.reviewer_telegram_user_id){
+   await reply(m,"🏦 No personal review account mapped for this Bank Assistant topic. Configure it in Telegram Manager → Bank Personal Review Routes.");
+   return;
+  }
+  reviewer=val(mapping.reviewer_telegram_user_id);
+ }
+ const {data,error}=await db().rpc("bb_bank_start_transaction_review",{
+  p_reviewer:reviewer,p_chat:privateChat?null:val(m.chat.id),
+  p_thread:privateChat?null:Number(m.message_thread_id||0)
+ });
+ if(error){await reply(m,"⚠️ Unable to start bank review: "+escape(error.message.slice(0,220)));return;}
+ const count=Number(data?.count||0),batch=val(data?.batch_id);
+ if(!batch||count<1){
+  await reply(m,"🏦 No unreviewed bank notifications available for this mapped topic. Keep forwarding normally, then ask /reviewtransaction.");
+  return;
+ }
+ const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-batch-review.html?batch="+
+  encodeURIComponent(batch)+"&v=private-route-20261009";
+ try{
+  const sent=await tg("sendMessage",{
+    chat_id:reviewer,
+    text:"🏦 <b>BIG BROTHER — Personal Bank Transaction Review</b>\n\n"+
+      "📋 <b>"+count+" transactions</b> to review.\n"+
+      "Only NEW Invoice Generator payments may be registered. Leave A/R and unrelated transfers alone.\n"+
+      "No registration occurs until you approve each New Invoice payment and confirm the summary.",
+    parse_mode:"HTML",reply_markup:{inline_keyboard:[[
+      {text:"📋 Open "+count+" Bank Transactions",web_app:{url}}
+    ]]}
+  });
+  if(sent?.ok!==true)throw Error("Telegram message not accepted");
+  if(!privateChat)await reply(m,"✅ On-demand bank review sent to the mapped personal Telegram account. Normal transaction analysis remains unchanged.");
+ }catch(_){
+  await reply(m,"⚠️ Telegram could not deliver this review privately. The mapped reviewer must first open the bot and send /start. The review batch remains saved; no bank transactions were registered.");
+ }
+}
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
