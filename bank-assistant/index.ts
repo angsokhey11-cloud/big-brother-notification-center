@@ -50,6 +50,7 @@ async function ensureTelegramCommands(){
    {command:"help",description:"Show supported bank notice formats"},
    {command:"bankhelp",description:"Show Bank Assistant help"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
+    {command:"reviewtransaction",description:"Prepare private bank transaction review"},
    {command:"myid",description:"Show your Telegram user ID"}
   ]},
   {scope:{type:"all_private_chats"},commands:[
@@ -59,6 +60,7 @@ async function ensureTelegramCommands(){
    {command:"photo",description:"Check Invoice Photo Organizer mapping"},
    {command:"phototest",description:"Test group and private message delivery"},
    {command:"review",description:"Open picture review with date and number boxes"},
+    {command:"reviewtransaction",description:"Review bank transfers privately on request"},
    {command:"done",description:"Finish forwarding pictures and open review"},
    {command:"cancel",description:"Discard the pending forwarded-photo batch"}
   ]}
@@ -682,6 +684,7 @@ async function invoicePhotoPrivate(m:any):Promise<boolean>{
 
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
+ if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return true;
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
  // Every forwarded item is queued so it receives one ordered result,
  // including unsupported bank formats that must be explicitly rejected.
