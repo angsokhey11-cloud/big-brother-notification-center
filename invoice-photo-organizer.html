@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>BIG BROTHER — Invoice Photo Organizer</title>
+<style>
+:root{font-family:Inter,Arial,"Noto Sans Khmer",sans-serif;color:#dceaff;background:#081627;font-size:14px}
+*{box-sizing:border-box}body{margin:0}main{max-width:1160px;margin:0 auto;padding:24px}
+a{color:#72c0ff;text-decoration:none}.back{display:inline-block;margin-bottom:18px}h1{font-size:30px;margin:6px 0 8px;color:white}
+h2{font-size:19px;margin:0 0 8px;color:#f3f7ff}p,small{color:#a9bdd5;line-height:1.5}
+.panel{border:1px solid #28405d;background:#101f34;padding:20px;border-radius:16px;margin:18px 0}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+label{display:block;font-weight:600;margin:8px 0 6px}input,select{width:100%;background:#0a1729;border:1px solid #3b526c;border-radius:9px;padding:12px;color:white;font:inherit}
+input:focus,select:focus{outline:2px solid #62baff;outline-offset:1px}
+input[type=checkbox]{width:auto;vertical-align:middle;margin:0 7px 0 0}
+button{border:0;border-radius:9px;padding:11px 14px;cursor:pointer;background:#3092e9;color:white;font:inherit;font-weight:700}
+button.secondary{background:#243d59}button.danger{background:#6c3341}button:disabled{opacity:.5;cursor:not-allowed}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+.small{font-size:12px}.row{border:1px solid #304762;border-radius:10px;padding:13px;margin:10px 0}
+.row h3{font-size:15px;margin:0 0 6px;color:#fff}.row p{margin:4px 0;font-size:13px;word-break:break-word}
+.chip{display:inline-block;border:1px solid #476483;border-radius:99px;padding:4px 8px;font-size:12px;color:#a4cdfb}
+.warn{color:#ffcf87}.ok{color:#83e6bc}.status{background:#0b1b2d;border-radius:9px;padding:11px;min-height:39px;white-space:pre-wrap}
+code{color:#a9d9ff}.hidden{display:none!important}
+@media(max-width:700px){main{padding:14px}.grid{grid-template-columns:1fr}.panel{padding:14px}}
+</style></head>
+<body><main>
+<a class="back" href="./">← Telegram Manager</a>
+<p class="small">BIG BROTHER · TELEGRAM MANAGER</p>
+<h1>📸 Invoice Photo Organizer</h1>
+<p>Map an authorized source group, topic, or private chat to any number of output destinations. No chat IDs are hard-coded in the bot.</p>
+<section class="panel">
+<h2>Current setup</h2>
+<p class="warn"><strong>Configuration stage:</strong> Organizer photo processing is not yet activated. Mappings are saved safely but will not intercept the current bot until its separate image processor has passed tests.</p>
+<div id="status" class="status" role="status">Checking administrator session…</div>
+<div class="toolbar"><button id="refresh" class="secondary">Refresh mappings</button><span class="chip" id="queueCount">Temporary queue: —</span></div>
+</section>
+<section class="panel">
+<h2>1. Incoming photo source</h2>
+<p>Choose where staff send invoice pictures. Topic ID 0 means a normal group or private chat. Pictures are sorted by invoice date, then invoice number.</p>
+<form id="sourceForm">
+<input type="hidden" id="sourceId"/>
+<div class="grid">
+<div><label for="sourceLabel">Source label</label><input id="sourceLabel" maxlength="120" required placeholder="Sales invoice photo group"/></div>
+<div><label for="sourceChat">Source Group / Chat ID</label><input id="sourceChat" required inputmode="text" placeholder="-1001234567890 or private chat ID"/></div>
+<div><label for="sourceThread">Source Topic ID (optional)</label><input id="sourceThread" type="number" step="1" min="0" value="0" required/></div>
+<div><label for="sourceIdle">Collect photos until idle (seconds)</label><input id="sourceIdle" type="number" step="1" min="15" max="600" value="60" required/></div>
+</div>
+<div class="toolbar"><button type="submit">Save source</button><button type="button" id="clearSource" class="secondary">New source</button></div>
+</form>
+<h2 style="margin-top:26px">Saved sources</h2><div id="sources"></div>
+</section>
+<section class="panel">
+<h2>2. Delivery destinations</h2>
+<p>Add multiple destinations to a source: group, topic, or private chat. The same sorted albums (up to 10 original corrected pictures each) will be sent to every active destination.</p>
+<form id="destForm">
+<input type="hidden" id="destId"/>
+<div class="grid">
+<div><label for="destRoute">From source</label><select id="destRoute" required></select></div>
+<div><label for="destLabel">Destination label</label><input id="destLabel" required maxlength="120" placeholder="My private Telegram chat"/></div>
+<div><label for="destChat">Destination Group / Private Chat ID</label><input id="destChat" required placeholder="123456789 or -1001234567890"/></div>
+<div><label for="destThread">Topic ID (0 for no topic)</label><input id="destThread" type="number" min="0" step="1" value="0" required/></div>
+</div>
+<p><label><input type="checkbox" id="destEnabled" checked/>Destination enabled</label></p>
+<div class="toolbar"><button type="submit">Save destination</button><button type="button" id="clearDest" class="secondary">New destination</button></div>
+</form>
+<h2 style="margin-top:26px">Saved destinations</h2><div id="destinations"></div>
+</section>
+<section class="panel">
+<h2>3. How it will work</h2>
+<p>Staff sends original invoice photos → bot collects a batch → reads invoice number/date → corrects orientation and crops without generating replacement content → sorts date/number → sends Telegram albums to all enabled destinations → deletes temporary file references and processing copies.</p>
+<p>For a private destination, open the bot in Telegram and press <strong>Start</strong> first. The bot must also be allowed to see photos in each source group. Invoice photos containing illegible numbers or dates will be marked for review rather than guessed.</p>
+</section>
+</main>
+<script src="https://angsokhey11-cloud.github.io/big-brother-admin-work/supabase-admin-work-adapter.js"></script>
+<script>
+(()=>{
+'use strict';
+const api=window.BBAdminWorkAdapter;
+const $=id=>document.getElementById(id);
+const endpoint='https://sjfhlaclgmkwwofzstok.supabase.co/functions/v1/bb-invoice-photo-routing';
+let routes=[],destinations=[];
+const esc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+function status(message,isError=false){$('status').textContent=message;$('status').style.color=isError?'#ff9caa':'#97d7b0'}
+async function call(action,extra={}){
+ if(!api)throw Error('Session adapter unavailable');
+ const session=await api.ensureSession();
+ const request=()=>fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({action,...extra})});
+ const response=await request(),data=await response.json().catch(()=>({}));
+ if(!response.ok||!data.ok)throw Error(data.error||'Request failed ('+response.status+')');
+ return data;
+}
+function render(){
+ $('queueCount').textContent='Temporary queue: 0 images stored';
+ const routeChoices=routes.map(r=>'<option value="'+r.route_id+'">'+esc(r.route_label)+' ('+esc(r.source_chat_id)+')</option>').join('');
+ const previous=$('destRoute').value;
+ $('destRoute').innerHTML='<option value="">Select a source…</option>'+routeChoices;
+ if(routes.some(r=>String(r.route_id)===previous))$('destRoute').value=previous;
+ $('sources').innerHTML=routes.length?routes.map(r=>
+  '<div class="row"><h3>'+esc(r.route_label)+' <span class="chip">Not active</span></h3>'+
+  '<p>Source: <code>'+esc(r.source_chat_id)+'</code> · Topic: '+esc(r.source_thread_id)+' · Idle: '+esc(r.idle_seconds)+'s</p>'+
+  '<div class="toolbar"><button type="button" class="secondary" data-route-edit="'+r.route_id+'">Edit</button>'+
+  '<button type="button" class="danger" data-route-remove="'+r.route_id+'">Delete</button></div></div>'
+ ).join(''):'<p>No sources configured yet.</p>';
+ $('destinations').innerHTML=destinations.length?destinations.map(d=>{
+  const r=routes.find(x=>x.route_id===d.route_id);
+  return '<div class="row"><h3>'+esc(d.destination_label)+' <span class="chip">'+(d.active?'Enabled':'Disabled')+'</span></h3>'+
+   '<p>Source: '+esc(r?.route_label||d.route_id)+' · Destination: <code>'+esc(d.telegram_chat_id)+'</code> · Topic: '+esc(d.telegram_thread_id)+'</p>'+
+   '<div class="toolbar"><button type="button" class="secondary" data-dest-edit="'+d.destination_id+'">Edit</button>'+
+   '<button type="button" class="secondary" data-dest-test="'+d.destination_id+'">Send harmless test</button>'+
+   '<button type="button" class="danger" data-dest-remove="'+d.destination_id+'">Delete</button></div></div>';
+ }).join(''):'<p>No destinations configured yet.</p>';
+}
+async function load(){
+ try{status('Loading current mappings…');const r=await call('list');routes=r.routes;destinations=r.destinations;render();$('queueCount').textContent='Temporary queue: '+r.queued+' references';status('✅ Admin routing loaded. Processing remains inactive until the image worker is tested.')}
+ catch(e){status(e.message,true)}
+}
+function resetSource(){$('sourceForm').reset();$('sourceId').value='';$('sourceThread').value=0;$('sourceIdle').value=60}
+function resetDest(){$('destForm').reset();$('destId').value='';$('destThread').value=0}
+$('refresh').onclick=load;$('clearSource').onclick=resetSource;$('clearDest').onclick=resetDest;
+$('sourceForm').onsubmit=async e=>{
+ e.preventDefault();try{
+  await call('route_save',{route_id:$('sourceId').value||null,route_label:$('sourceLabel').value,source_chat_id:$('sourceChat').value.trim(),source_thread_id:Number($('sourceThread').value),idle_seconds:Number($('sourceIdle').value)});
+  resetSource();await load();status('✅ Source saved (inactive until the processor is verified).');
+ }catch(err){status(err.message,true)}
+};
+$('destForm').onsubmit=async e=>{
+ e.preventDefault();try{
+  await call('destination_save',{destination_id:$('destId').value||null,route_id:Number($('destRoute').value),destination_label:$('destLabel').value,telegram_chat_id:$('destChat').value.trim(),telegram_thread_id:Number($('destThread').value),active:$('destEnabled').checked});
+  resetDest();await load();status('✅ Destination saved.');
+ }catch(err){status(err.message,true)}
+};
+$('sources').onclick=async e=>{
+ const edit=e.target.closest('[data-route-edit]'),remove=e.target.closest('[data-route-remove]');
+ if(edit){const r=routes.find(x=>String(x.route_id)===edit.dataset.routeEdit);if(!r)return;
+  $('sourceId').value=r.route_id;$('sourceLabel').value=r.route_label;$('sourceChat').value=r.source_chat_id;
+  $('sourceThread').value=r.source_thread_id;$('sourceIdle').value=r.idle_seconds;$('sourceForm').scrollIntoView({behavior:'smooth'});}
+ if(remove){if(!confirm('Delete this source and all its destination mappings?'))return;
+  try{await call('route_delete',{route_id:Number(remove.dataset.routeRemove)});await load()}catch(err){status(err.message,true)}}
+};
+$('destinations').onclick=async e=>{
+ const edit=e.target.closest('[data-dest-edit]'),test=e.target.closest('[data-dest-test]'),remove=e.target.closest('[data-dest-remove]');
+ if(edit){const d=destinations.find(x=>String(x.destination_id)===edit.dataset.destEdit);if(!d)return;
+  $('destId').value=d.destination_id;$('destRoute').value=d.route_id;$('destLabel').value=d.destination_label;
+  $('destChat').value=d.telegram_chat_id;$('destThread').value=d.telegram_thread_id;$('destEnabled').checked=d.active;$('destForm').scrollIntoView({behavior:'smooth'});}
+ if(test){if(!confirm('Send a harmless test message to this Telegram destination?'))return;
+  try{await call('destination_test',{destination_id:Number(test.dataset.destTest)});status('✅ Test message delivered.')}catch(err){status(err.message,true)}}
+ if(remove){if(!confirm('Delete this destination mapping?'))return;
+  try{await call('destination_delete',{destination_id:Number(remove.dataset.destRemove)});await load()}catch(err){status(err.message,true)}}
+};
+load();
+})();
+</script></body></html>
