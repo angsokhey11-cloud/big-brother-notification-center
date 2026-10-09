@@ -181,6 +181,12 @@ Deno.serve(async(req:Request)=>{
     const batch=await getBatch(body.batch_id);
     if(action==="approve"&&batch.status!=="awaiting_review")return response({error:"Review batch is not awaiting approval"},409);
     if(action==="retry"&&batch.status!=="failed")return response({error:"Only failed delivery attempts may be retried"},409);
+    if(action==="retry"){
+      const {data:uncertain,error:ue}=await client.from("bb_invoice_photo_delivery_albums")
+        .select("album_index").eq("batch_id",batch.batch_id).eq("status","sending").limit(1);
+      if(ue)throw ue;
+      if(uncertain?.length)return response({error:"At least one Telegram delivery result is uncertain. Ask admin to verify before retrying; we must not risk duplicate invoice albums."},409);
+    }
     const {data:photos,error:pe}=await client.from("bb_invoice_photo_queue")
       .select("review_state,invoice_no,invoice_date,confirmed_by_telegram_user_id")
       .eq("review_batch_id",batch.batch_id);
