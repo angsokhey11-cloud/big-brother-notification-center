@@ -33,6 +33,19 @@
 - `bb_invoice_photo_queue` — temporary Telegram file references, per-image review metadata and manual confirmation guard. No original/processed image bytes.
 - Scheduled deletion of expired queue and review tasks; direct client access to DB tables disabled with RLS and grants.
 
+## New photo-by-photo Mini App review UI (09-Oct-2026)
+
+**The reviewer explicitly requested a visual form, not message replies.**
+
+- The private bot now exposes `/review` on Telegram's private slash-command menu. It sends a secure `web_app` button to launch `invoice-photo-review.html` as an in-Telegram Mini App.
+- One invoice PHOTO fills the top region; below it are TWO input boxes: native date picker **Invoice Date**, and text field **Invoice Number** (numeric validation, preserve leading zeros).
+- `Save & Next` persists the current number/date, advances to the following image; `Previous` allows correction; `Review summary` lists all confirmed details and allows Edit.
+- The new `bb-invoice-photo-review` Edge Function verifies the signed Telegram Mini App `initData` HMAC, checks expiration, checks the mapped authorized private Telegram reviewer, loads temporary queue items, safely proxies original Telegram photo bytes, and saves manual metadata through the DB confirmation guard. No photo blobs stored.
+- When no pending review exists, the Mini App offers a clearly labeled **UI preview/demo** with placeholder picture areas. Nothing is sent or saved in demo mode.
+- **Approve & Send remains DISABLED** until actual forwarding/collection, image correction, Telegram album delivery, and idempotent cleanup are connected and verified. The Mini App is a working review interface and backend, **NOT a complete or live invoice organizer**.
+- Telegram private review command reply links to `https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html`. Do not use this HTML as a public auth mechanism; the API depends on Telegram's signed `initData`. The standalone browser URL only displays preview mode.
+- Existing private `/photo`, `/phototest`, `/myid`, `/start`, `/help` and Bank Assistant group commands remain supported.
+
 ## Future implementation requirements (not yet live)
 
 1. Build isolated private-forwarded-photo handler, called from existing webhook AFTER secret verification, with strict `message.chat.type === 'private'`, `message.from.id === message.chat.id`, match to an active private-forward-only route for that reviewer, and `photo` plus Telegram `forward_origin` or `forward_date`. Don't ingest ordinary bot messages, own media responses, group photos, or business chatter.
