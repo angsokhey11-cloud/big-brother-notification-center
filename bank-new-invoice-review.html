@@ -281,6 +281,14 @@ el("bankForm").onsubmit=async(e)=>{
   const names=clean(el("aliases").value).split(",").map(clean).filter(Boolean).slice(0,12);
   const bank=clean(el("bankName").value),holder=clean(el("holder").value);
   if(bank.length<2||holder.length<2)throw Error("Enter bank name and account holder.");
+  const duplicate=identities.find(x=>x.active===true&&x.customer_id===customer
+    &&normalized(x.bank_name)===normalized(bank)&&normalized(x.account_holder_name)===normalized(holder));
+  if(duplicate){
+   el("bankPopup").close();populatePayers();
+   el("payer").value=String(duplicate.identity_id);
+   status("ℹ️ This bank payer is already in Customer Bank Directory. Selected the existing entry — no duplicate saved.");
+   return;
+  }
   const payerId=await rpc("bb_customer_bank_identity_save",{
     p_customer_id:customer,p_bank_name:bank,p_holder_name:holder,
     p_account_number:clean(el("accountNumber").value)||null,p_alternative_names:names,p_identity_id:null
