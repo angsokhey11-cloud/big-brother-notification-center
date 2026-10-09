@@ -81,6 +81,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <div id="saveFeedback" class="notice hide" role="status" aria-live="polite" style="margin-top:12px"></div>
 </form>
 <button class="secondary wide" type="button" id="jumpSummary">Review summary</button>
+<button class="danger wide" id="cancelReview" type="button">✖ Cancel Review — Discard This Batch</button>
 </section>
 <section id="summary" class="hide">
 <div class="row"><h2>Final review summary</h2><strong id="summaryCount"></strong></div>
@@ -89,8 +90,9 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <p>Only <strong>New Invoice</strong> selections will be registered. Leaving a transfer alone does not change A/R, payment history, deposits, or the bank ledger.</p>
 <button class="wide" id="approve" type="button">Confirm &amp; Register New Invoice Payments</button>
 <button class="secondary wide" id="back" type="button">← Back to transactions</button>
+<button class="danger wide" id="cancelSummary" type="button">✖ Cancel Review — Discard This Batch</button>
 </section>
-<section id="complete" class="hide"><h2>✅ Review completed</h2><p id="completeText"></p></section>
+<section id="complete" class="hide"><h2 id="completeTitle">✅ Review completed</h2><p id="completeText"></p></section>
 <dialog id="bankPopup"><div class="inside">
 <h2>🏦 Register Missing Bank Payer</h2>
 <p>Save a missing payer directly in the Customer Bank Directory. This does not register the bank transaction.</p>
@@ -134,7 +136,7 @@ async function rpc(name,args={}){let jwt=await token();const request=t=>fetch(en
  let res=await request(jwt);if(res.status===401){await refresh();res=await request(await token())}return decode(res)}
 async function call(action,args={}){const res=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,batch_id:batchId,init_data:initData,session_jwt:await token(),...args})});return decode(res)}
 async function signIn(email,password){const res=await fetch(endpoint+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:key,"content-type":"application/json"},body:JSON.stringify({email,password})});putSession(await decode(res))}
-function lock(value){busy=value;for(const id of ["next","previous","approve","addPayer","saveBank","jumpSummary"]){el(id).disabled=value}}
+function lock(value){busy=value;for(const id of ["next","previous","approve","addPayer","saveBank","jumpSummary","cancelReview","cancelSummary"]){el(id).disabled=value}}
 function customerLocationText(c){
  const code=clean(c?.location_code);
  if(!code)return "Location not assigned";
@@ -292,6 +294,7 @@ function render(){
  updateCustomerLocationHint(customers.find(c=>c.customer_id===possible));
  if(payload.payer_identity_id)el("payer").value=String(payload.payer_identity_id);
  setChoice(i.review_decision||"");
+ el("cancelReview").disabled=busy||batch.status!=="reviewing";
  el("previous").disabled=busy||index===0;
  el("next").disabled=busy||batch.status!=="reviewing";
  el("next").textContent=index===items.length-1?"Save & Review Summary →":"Save & Next →";
@@ -379,6 +382,7 @@ function summary(){
  }
  el("total").textContent="Review total: "+items.length+"\nNew Invoice Bank Register: "+selected.length+
   "\nLeave Alone (A/R and other): "+ignores.length;
+ el("cancelSummary").disabled=busy||batch.status!=="reviewing";
  el("approve").disabled=busy||saved!==items.length||
    !["reviewing","processing"].includes(batch.status);
  el("approve").textContent=batch.status==="processing"?"Resume Final Registration":"Confirm & Register "+selected.length+" New Invoice Payments";
@@ -441,6 +445,33 @@ el("detailsForm").onsubmit=async(e)=>{e.preventDefault();await next(index===item
 el("previous").onclick=async()=>{if(index===0||busy)return;await next(-1)};
 el("jumpSummary").onclick=summary;
 el("back").onclick=()=>render();
+async function cancelPendingReview(){
+ if(busy||batch?.status!=="reviewing")return;
+ const warning="CANCEL THIS ENTIRE BANK REVIEW?\n\n"+
+  items.length+" bank notices will be discarded, including "+reviewed()+" saved review decisions.\n"+
+  "These test notices will NOT appear in another review batch.\n\n"+
+  "No Bank Register entries, invoices, A/R, payments or deposits will be created or changed.\n\n"+
+  "This cannot be undone. Only newly forwarded notices can be reviewed later.";
+ if(!confirm(warning))return;
+ lock(true);
+ try{
+  const result=await call("cancel");
+  if(!result?.cancelled)throw Error("The server did not confirm cancellation.");
+  batch.status="cancelled";
+  el("completeTitle").textContent="🚫 Review cancelled";
+  el("completeText").textContent="Cancelled this batch and discarded "+
+   Number(result.discarded||0)+" pending bank notices. No Bank Register entries, invoices or payments were changed. "+
+   "Send /reviewtransaction after forwarding NEW bank notices to start a fresh review.";
+  section("complete");
+  clear();
+ }catch(error){
+  const msg=error instanceof Error?error.message:String(error);
+  say("⚠️ Review not cancelled: "+msg,true);
+  el("alert").scrollIntoView({behavior:"smooth",block:"center"});
+ }finally{lock(false)}
+}
+el("cancelReview").onclick=cancelPendingReview;
+el("cancelSummary").onclick=cancelPendingReview;
 el("approve").onclick=async()=>{
  if(busy||reviewed()!==items.length)return;
  const n=items.filter(x=>x.review_decision==="new_invoice").length;
@@ -486,7 +517,8 @@ async function initialize(){
   if(!session?.access_token){section("login");return}
   const result=await call("load");
   batch=result.batch;items=result.items||[];
-  if(batch.status==="completed"){section("complete");el("completeText").textContent="This batch is already complete.";return}
+  if(batch.status==="completed"){section("complete");el("completeTitle").textContent="✅ Review completed";el("completeText").textContent="This batch is already complete.";return}
+   if(batch.status==="cancelled"){section("complete");el("completeTitle").textContent="🚫 Review cancelled";el("completeText").textContent="This test batch was cancelled. Its bank notices will not re-enter review and nothing was registered. Forward fresh bank notices, then run /reviewtransaction.";return}
   const [cs,ids,locs]=await Promise.all([
     rpc("bb_bank_register_customers"),
     rpc("bb_customer_bank_identity_list"),
