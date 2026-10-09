@@ -52,10 +52,10 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <h2 id="sender">Payer</h2><div id="customerMatch" class="small" style="font-size:14px;margin:-3px 0 12px;line-height:1.5" aria-live="polite"></div><div id="original" class="notice"></div>
 <h3>Choose this transfer's purpose</h3>
 <div class="purpose">
-<button type="button" id="chooseNew">✅ New Invoice — Register at Final Approval</button>
+<button type="button" id="chooseNew">✅ New Invoice — Register</button>
 <button type="button" id="chooseIgnore">⏭ Leave Alone — A/R / Other</button>
 </div>
-<p class="small" id="purposeHint">Review first. Bank registration happens only after the final summary approval.</p>
+<p class="small" id="purposeHint">Choose whether to register this for a new Invoice Generator sale.</p>
 <form id="detailsForm" novalidate>
 <div id="newDetails" class="hide">
  <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Search customer name, ID, or location…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
@@ -76,11 +76,10 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 </div>
 <div class="row" style="margin-top:17px">
  <button class="secondary" id="previous" type="button">← Previous</button>
- <button id="next" type="submit">Save Review &amp; Next →</button>
+ <button id="next" type="submit">Save &amp; Next →</button>
 </div>
 <div id="saveFeedback" class="notice hide" role="status" aria-live="polite" style="margin-top:12px"></div>
 </form>
-<p class="small">Saving this review does not create a Bank Register entry. You must finish reviewing all transactions and approve the final summary.</p>
 <button class="secondary wide" type="button" id="jumpSummary">Review summary</button>
 </section>
 <section id="summary" class="hide">
@@ -253,7 +252,7 @@ function setChoice(value){choice=value;
  el("chooseNew").classList.toggle("active",choice==="new_invoice");
  el("chooseIgnore").classList.toggle("active",choice==="ignore");
  el("purposeHint").textContent=choice==="ignore"?"This transfer will not be registered or applied to any invoice.":
-  choice==="new_invoice"?"Review customer and payer, then save. Registration happens only after final approval.":
+  choice==="new_invoice"?"Confirm customer, payer, bank transaction and currency before saving.":
   "Select New Invoice or Leave Alone to continue.";
 }
 function setRate(){
@@ -295,7 +294,7 @@ function render(){
  setChoice(i.review_decision||"");
  el("previous").disabled=busy||index===0;
  el("next").disabled=busy||batch.status!=="reviewing";
- el("next").textContent=index===items.length-1?"Save Review & Open Summary →":"Save Review & Next →";
+ el("next").textContent=index===items.length-1?"Save & Review Summary →":"Save & Next →";
  if(batch.status==="processing"){say("This batch has been approved for registration. Use Review Summary to resume safe completion; no more edits.",false);}
 }
 function details(){
@@ -378,7 +377,7 @@ function summary(){
   edit.onclick=()=>{index=pos;render()};
   row.append(label,edit);el("summaryItems").append(row);
  }
- el("total").textContent="Review total: "+items.length+"\nSelected for final registration (NOT YET REGISTERED): "+selected.length+
+ el("total").textContent="Review total: "+items.length+"\nNew Invoice Bank Register: "+selected.length+
   "\nLeave Alone (A/R and other): "+ignores.length;
  el("approve").disabled=busy||saved!==items.length||
    !["reviewing","processing"].includes(batch.status);
