@@ -192,14 +192,21 @@ el("demo").onclick=()=>{
  index=0;el("mode").textContent="Demo";render();
 };
 async function init(){
- if(!initData){el("mode").textContent="Preview only";section("empty");el("emptyText").textContent="Open a review task using the button in BIG BROTHER Bot's private Telegram chat. You can also preview the two-box screen here, without saving or sending anything.";return}
+ if(!initData){
+  el("mode").textContent="Preview only";section("empty");
+  el("emptyText").textContent="Telegram did not provide an authorized Mini App session. Please close this window and reopen using the Open Invoice Review button in your private bot chat. The demo below is for layout preview only.";
+  return;
+ }
+ // Once Telegram supplies a signed session, never show fake demo invoices in place of a real batch.
+ el("demo").textContent="Retry loading real invoices";
+ el("demo").onclick=()=>{section("loading");init()};
  try{
   const out=await call("load");
   if(out.empty||!out.items?.length){el("mode").textContent="No review task";section("empty");el("emptyText").textContent="No active invoice batch yet. Forward your chosen invoice photos to the bot privately. Then tap /done or wait for the automatic review message.";return}
   batch=out.batch;items=out.items;index=items.findIndex(x=>x.review_state!=="confirmed");if(index<0)index=0;
   el("mode").textContent=batch.status==="collecting"?"Collecting":batch.status==="failed"?"Delivery issue":"Private review";
   await render();
- }catch(e){el("mode").textContent="Unavailable";section("empty");el("emptyText").textContent="Unable to open the private task: "+e.message}
+ }catch(e){el("mode").textContent="Connection issue";section("empty");el("emptyText").textContent="Your forwarded pictures are still saved. Loading failed: "+e.message+" Tap Retry loading real invoices; do not forward the pictures again.";}
 }
 init();
 })();
