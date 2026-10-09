@@ -170,20 +170,19 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
 }
 // Offer a bank register review, never create any accounting record on detection.
 // This is limited to parsed bank notices posted in authorized Bank Assistant routes.
+// Silently retain structured bank notice metadata for on-demand review.
+// This function never starts a task and never writes to Bank Register.
 async function newInvoiceRegisterPrompt(m:any,notice:ReturnType<typeof parseNotice>){
  if(!notice.sender||!notice.currency||notice.amount===null||!Number.isFinite(notice.amount)||notice.amount<=0)return {};
- const client=db(),chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),message=Number(m.message_id);
- if(!chat||!Number.isSafeInteger(message)||message<1)return {};
- const {error:insertError}=await client.from("bb_bank_new_invoice_review_drafts")
-  .upsert({source_chat_id:chat,source_thread_id:thread,source_message_id:message,
-    sender_name:notice.sender,transaction_id:notice.transactionId||null,amount:notice.amount,
-    currency:notice.currency,bank_channel:notice.channel||null},
-    {onConflict:"source_chat_id,source_thread_id,source_message_id",ignoreDuplicates:true});
- if(insertError){console.warn("Bank New Invoice review candidate creation failed",insertError.code||"database");return {};}
- const {data:entry,error:readError}=await client.from("bb_bank_new_invoice_review_drafts")
-  .select("draft_id,status").eq("source_chat_id",chat).eq("source_thread_id",thread).eq("source_message_id",message).maybeSingle();
- if(readError||!entry||!["candidate","reviewing"].includes(entry.status))return {};
- return {reply_markup:{inline_keyboard:[[{text:"🏦 New Invoice — Register Bank Payment",callback_data:"bbnew:"+entry.draft_id}]]}};
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),mid=Number(m.message_id);
+ if(!chat||!Number.isSafeInteger(mid)||mid<=0)return {};
+ const {error}=await db().from("bb_bank_new_invoice_review_drafts").upsert({
+  source_chat_id:chat,source_thread_id:thread,source_message_id:mid,
+  sender_name:notice.sender,transaction_id:notice.transactionId||null,
+  amount:notice.amount,currency:notice.currency,bank_channel:notice.channel||null
+ },{onConflict:"source_chat_id,source_thread_id,source_message_id",ignoreDuplicates:true});
+ if(error)console.warn("Bank notice review metadata capture failed",error.code||"db");
+ return {};
 }
 async function newInvoiceRegisterClick(cb:any,scope:RouteScope){
  const data=val(cb.data),match=data.match(/^bbnew:([0-9a-f-]{36})$/i);
