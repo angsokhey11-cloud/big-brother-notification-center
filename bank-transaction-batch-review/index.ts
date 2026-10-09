@@ -73,7 +73,27 @@ Deno.serve(async(req:Request)=>{
   if(action==="load"){
    return reply({ok:true,batch:{batch_id:batch.batch_id,status:batch.status,expires_at:batch.expires_at},items:await getEntries()});
   }
-  if(action==="save"){
+  if(action==="cancel"){
+    // Cancel only a pending review. The protected DB function atomically marks
+    // these bank notice candidates discarded, never updating Bank Register.
+    if(batch.status==="cancelled")return reply({ok:true,cancelled:true,already_cancelled:true,discarded:0});
+    if(batch.status!=="reviewing")return reply({
+     error:"Cannot cancel after Confirm & Register has started. Check Bank Register; no bank entries were removed."
+    },409);
+    const {data:out,error:cancelError}=await client.rpc("bb_bank_cancel_transaction_review",{
+     p_batch_id:batchId,p_reviewer:reviewerId
+    });
+    if(cancelError)return reply({error:cancelError.message||"Unable to cancel pending review."},409);
+    if(!out?.ok||!out?.cancelled)return reply({error:"Review cancellation was not confirmed."},409);
+    if(!out?.already_cancelled){
+     await telegramPrivate(reviewerId,"🚫 BIG BROTHER — BANK REVIEW CANCELLED\\n\\n"+
+      Number(out.discarded||0)+" pending bank notices discarded from review.\\n"+
+      "No bank transactions were registered or removed. Existing Bank Register and payments are unchanged.\\n\\n"+
+      "Forward new bank notices to the mapped group/topic, then send /reviewtransaction to start a fresh review.").catch(()=>{});
+    }
+    return reply(out);
+   }
+   if(action==="save"){
    if(batch.status!=="reviewing")return reply({error:"Review choices are locked after final approval begins."},409);
    const draftId=text(body.draft_id),decision=text(body.decision);
    if(!uuid.test(draftId)||!["ignore","new_invoice"].includes(decision))return reply({error:"Invalid review selection."},400);
