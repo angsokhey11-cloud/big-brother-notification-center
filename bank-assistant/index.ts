@@ -446,7 +446,8 @@ async function callback(cb:any){
  await reply(m,"✅ បានរក្សាទុកឈ្មោះអ្នកផ្ទេរហើយ។ សារជូនដំណឹងបន្ទាប់អាចផ្គូផ្គងនឹងអតិថិជននេះបាន។");
 }
 
-// Simple private Telegram ID lookup; do not expose any other user's identity or affect group routes.
+// Private Telegram ID lookup and photo-organizer routing diagnostics.
+// All photo organizer actions here are administrative checks only; invoice intake is NOT active.
 async function replyToPrivateIdentity(m:any):Promise<boolean>{
  if(val(m?.chat?.type)!=="private"||m.from?.is_bot===true)return false;
  const id=val(m.from?.id),chat=val(m.chat?.id);
@@ -454,16 +455,85 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  const t=val(m.text);
  const start=/^\/start(?:@\w+)?(?:\s+\S{1,64})?$/i.test(t);
  const myid=/^\/myid(?:@\w+)?$/i.test(t)||/^(?:id|my id)$/i.test(t);
- if(!start&&!myid)return false;
- const message=(start?"👋 <b>Welcome to BIG BROTHER Bot!</b>\n\n":"")
-  +"🪪 <b>Your Telegram User ID</b>\n<code>"+escape(id)+"</code>\n\n"
-  +"Copy this number into <b>Telegram Manager → Invoice Photo Organizer → Private Reviewer Telegram User ID</b>.\n\n"
-  +"Type <code>ID</code> or <code>/myid</code> anytime to see your ID.\n\n"
-  +"📸 The invoice photo-forwarding and review workflow is not active yet; please wait before sending business invoice photos.";
- await reply(m,message);
+ const status=/^(?:\/photostatus(?:@\w+)?|photo|photo status|organizer)$/i.test(t);
+ const test=/^(?:\/phototest(?:@\w+)?|photo test)$/i.test(t);
+ if(!start&&!myid&&!status&&!test)return false;
+ if(start||myid){
+   const message=(start?"👋 <b>Welcome to BIG BROTHER Bot!</b>\n\n":"")
+     +"🪪 <b>Your Telegram User ID</b>\n<code>"+escape(id)+"</code>\n\n"
+     +"To check your private invoice-review mapping, send <code>PHOTO</code> or <code>/photostatus</code>.\n"
+     +"To test your mapped delivery destinations, send <code>/phototest</code>.\n\n"
+     +"📸 Invoice forwarding, photo review and album delivery are not yet active.";
+   await reply(m,message);
+   return true;
+ }
+ // Never reveal routing details or trigger delivery tests for unapproved Telegram accounts.
+ if(!await allowed(id)){
+   await reply(m,"🔒 Private Invoice Photo Organizer settings are available only to an authorized BIG BROTHER Telegram administrator.");
+   return true;
+ }
+ const client=db();
+ const {data:route,error:routeError}=await client.from("bb_invoice_photo_routes")
+   .select("route_id,route_label,active,source_chat_id,source_thread_id,reviewer_telegram_user_id,review_mode,intake_mode")
+   .eq("source_chat_id",id).eq("reviewer_telegram_user_id",id).eq("intake_mode","private_forward_only")
+   .limit(1).maybeSingle();
+ if(routeError)throw routeError;
+ if(!route){
+   await reply(m,"📸 <b>Invoice Photo Organizer</b>\nYour Telegram account is authorized, but you have no matching private review route yet.\nConfigure your private reviewer account in Telegram Manager → Invoice Photo Organizer.");
+   return true;
+ }
+ const {data:outputs,error:destError}=await client.from("bb_invoice_photo_destinations")
+   .select("destination_label,telegram_chat_id,telegram_thread_id,active")
+   .eq("route_id",route.route_id).order("destination_id");
+ if(destError)throw destError;
+ const activeOutputs=(outputs||[]).filter((x:any)=>x.active===true);
+ const privateOutput=activeOutputs.some((x:any)=>val(x.telegram_chat_id)===id&&Number(x.telegram_thread_id||0)===0);
+ const groupOutputs=activeOutputs.filter((x:any)=>val(x.telegram_chat_id).startsWith("-"));
+ const authorized=route.reviewer_telegram_user_id===id&&route.source_chat_id===id&&route.review_mode==="manual_all"&&route.intake_mode==="private_forward_only"&&Number(route.source_thread_id)===0;
+ if(test){
+   if(!authorized||!groupOutputs.length||!privateOutput){
+     await reply(m,"⚠️ The private review mapping or required destinations are incomplete. Send <code>PHOTO</code> to see the setup.");
+     return true;
+   }
+   const results:string[]=[];
+   for(const target of activeOutputs){
+     const dest:Record<string,unknown>={
+       chat_id:target.telegram_chat_id,
+       text:"✅ BIG BROTHER — Invoice Photo Organizer\nTest delivery from your mapped private reviewer.\nDestination: "+val(target.destination_label)+"\nThis is a routing test only. No invoice images or accounting records were shared."
+     };
+     if(Number(target.telegram_thread_id)>0)dest.message_thread_id=Number(target.telegram_thread_id);
+     try{
+       const res=await tg("sendMessage",dest);
+       if(res?.ok!==true)throw Error("Telegram destination rejected test");
+       results.push("✅ "+escape(val(target.destination_label)));
+     }catch(err){
+       results.push("❌ "+escape(val(target.destination_label))+" — unable to deliver");
+     }
+   }
+   await reply(m,"📸 <b>Photo Organizer — Delivery Test</b>\n"+results.join("\n")+"\n\nAutomatic invoice collection, private review and corrected-photo albums remain disabled.");
+   return true;
+ }
+ const lines=[
+   "📸 <b>BIG BROTHER — Invoice Photo Organizer</b>",
+   "👤 Private reviewer linked: "+(authorized?"✅ Yes":"❌ Invalid"),
+   "🔐 Reviewer ID: <code>"+escape(id)+"</code>",
+   "📥 Input: Private forwarded photos only",
+   "📝 Every invoice requires manual number + date approval",
+   "📤 Group/topic destinations: "+groupOutputs.length,
+   "📩 Your private output: "+(privateOutput?"✅ Mapped":"❌ Not mapped"),
+   "⚙️ Organizer engine: "+(route.active?"⚠️ Enabled":"⏳ Not active yet"),
+   "",
+   "<b>Output mappings</b>"
+ ];
+ for(const output of activeOutputs.slice(0,15)){
+   lines.push("• "+escape(val(output.destination_label))+(Number(output.telegram_thread_id)>0?" (topic)":""));
+ }
+ if(!activeOutputs.length)lines.push("No enabled destinations");
+ lines.push("","Use <code>/phototest</code> to test delivery of a harmless message to mapped destinations.",
+   "⚠️ Actual invoice review/photo delivery is not built yet. Do not forward sensitive invoices for processing.");
+ await reply(m,lines.join("\n"));
  return true;
 }
-
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
