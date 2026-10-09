@@ -37,7 +37,7 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
 <body><main class="wrap">
 <div class="top"><span class="logo">📸 BIG BROTHER · INVOICE REVIEW</span><span class="pill" id="mode">Loading…</span></div>
 <h1>Review invoice pictures</h1>
-<p style="margin-top:0">One photo at a time. Enter the date and invoice number, then tap <strong>Save &amp; Next</strong>.</p>
+<p style="margin-top:0">One original invoice photo at a time. Enter its date and number, then tap <strong>Save &amp; Next</strong>. After checking all photos, approve delivery to your mapped group and private chat.</p>
 <div id="alert" class="msg hide" role="status" aria-live="polite"></div>
 <div id="loading" class="card">Checking your private Telegram review task…</div>
 <div id="empty" class="card hide">
@@ -65,8 +65,8 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
  <div class="row"><h2 style="margin:0">Batch review summary</h2><span id="completeCount" class="pill"></span></div>
  <p>Check all invoice dates and numbers. Tap Edit to return to any picture.</p>
  <div id="summaryList"></div>
- <p id="deliveryNotice" class="subtle">Delivery is not connected yet. This screen cannot send photos until the image-processing and album-delivery engine is verified.</p>
- <button class="primary wide" id="approve" disabled>Approve &amp; Send (not active yet)</button>
+ <p id="deliveryNotice" class="subtle">After confirming all pictures, the bot will send your sorted original photos to your mapped group/topic and private chat.</p>
+ <button class="primary wide" id="approve" disabled>Approve &amp; Send</button>
  <button class="secondary wide" id="backToReview">← Back to pictures</button>
 </section>
 <p class="footer">Private reviewer only · No OCR auto-approval · Temporary image references · No modification of original invoice details</p>
@@ -153,13 +153,37 @@ function showSummary(){
   edit.onclick=()=>{index=items.findIndex(x=>x===i);render()};
   row.append(info,edit);el("summaryList").append(row);
  }
+ const ready=n===items.length&&items.length>0;
+ const isReview=batch?.status==="awaiting_review"&&!preview;
+ const isFailed=batch?.status==="failed"&&!preview;
+ const isCollecting=batch?.status==="collecting"&&!preview;
+ const btn=el("approve");
+ btn.disabled=busy||!ready||(!isReview&&!isFailed);
+ btn.textContent=isFailed?"Retry failed album delivery":"Approve & Send";
  el("deliveryNotice").textContent=preview
-  ?"UI preview only. Nothing is stored or sent. Automatic album delivery is not connected yet."
-  :(n===items.length?"All metadata reviewed. Album delivery is not connected yet, so approval is locked for safety.":"Complete every date and invoice number before approval. Album sending is not connected yet.");
+  ?"UI preview only. Nothing is stored or sent."
+  :isCollecting?"Still collecting forwarded photos. Wait a moment or send /done privately to the bot."
+  :isFailed?"Some albums did not reach their destinations. Already delivered albums are tracked separately. If the bot reports an uncertain send, contact admin before retrying."
+  :ready?"After approval, the bot sends the original, unaltered invoice photos sorted by your confirmed date and number. Printed invoice details remain intact."
+  :"Complete the date and number for EVERY picture before approving.";
 }
 el("form").onsubmit=async(e)=>{e.preventDefault();await move(index===items.length-1?"summary":1)};
 el("prev").onclick=async()=>{if(busy||index===0)return;const n=el("number").value.trim(),d=el("date").value;if(n&&d){await move(-1)}else{index--;await render()}};
 el("summaryButton").onclick=()=>showSummary();el("backToReview").onclick=()=>render();
+el("approve").onclick=async()=>{
+ if(busy||preview||!batch||completed()!==items.length||!items.length)return;
+ const retry=batch.status==="failed";
+ if(!retry&&!confirm("Approve ALL "+items.length+" reviewed invoices and send them to the mapped group/topic and your private chat?"))return;
+ busy=true;el("approve").disabled=true;el("approve").textContent="Sending albums…";clearStatus();
+ try{
+  const out=await call(retry?"retry":"approve",{batch_id:batch.batch_id});
+  if(!out.completed)throw Error("Delivery incomplete. Reopen review for details.");
+  section("empty");el("mode").textContent="Delivered";el("empty").querySelector("h2").textContent="✅ All invoice albums delivered";
+  el("emptyText").textContent="Your sorted photos were sent to both mapped destinations. Temporary review data was cleared. The bot also sent you a confirmation.";
+  el("demo").classList.add("hide");batch=null;items=[];
+ }catch(e){if(batch){batch.status="failed";showSummary()}status(e.message,true)}
+ finally{busy=false}
+};
 el("demo").onclick=()=>{
  preview=true;batch={status:"awaiting_review"};items=[
   {queue_id:1,source_message_id:1,invoice_no:"",invoice_date:"",review_state:"pending_review"},
@@ -171,9 +195,9 @@ async function init(){
  if(!initData){el("mode").textContent="Preview only";section("empty");el("emptyText").textContent="Open a review task using the button in BIG BROTHER Bot's private Telegram chat. You can also preview the two-box screen here, without saving or sending anything.";return}
  try{
   const out=await call("load");
-  if(out.empty||!out.items?.length){el("mode").textContent="No review task";section("empty");el("emptyText").textContent="No invoice pictures are awaiting review. The private forwarding/collection engine is still being built.";return}
+  if(out.empty||!out.items?.length){el("mode").textContent="No review task";section("empty");el("emptyText").textContent="No active invoice batch yet. Forward your chosen invoice photos to the bot privately. Then tap /done or wait for the automatic review message.";return}
   batch=out.batch;items=out.items;index=items.findIndex(x=>x.review_state!=="confirmed");if(index<0)index=0;
-  el("mode").textContent=batch.status==="collecting"?"Collecting":"Private review";
+  el("mode").textContent=batch.status==="collecting"?"Collecting":batch.status==="failed"?"Delivery issue":"Private review";
   await render();
  }catch(e){el("mode").textContent="Unavailable";section("empty");el("emptyText").textContent="Unable to open the private task: "+e.message}
 }
