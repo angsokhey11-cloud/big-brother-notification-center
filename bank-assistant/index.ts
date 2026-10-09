@@ -51,7 +51,8 @@ async function ensureTelegramCommands(){
    {command:"bankhelp",description:"Show Bank Assistant help"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
     {command:"reviewtransaction",description:"Prepare private bank transaction review"},
-   {command:"myid",description:"Show your Telegram user ID"}
+   {command:"myid",description:"Show your Telegram user ID"},
+   {command:"groupid",description:"Show this group and topic ID for routing"}
   ]},
   {scope:{type:"all_private_chats"},commands:[
    {command:"start",description:"Welcome and show your Telegram ID"},
@@ -73,6 +74,29 @@ async function reply(m:any,html:string,extra:Record<string,unknown>={}){
  const destination:Record<string,unknown>={chat_id:m.chat.id,reply_to_message_id:m.message_id,text:html.slice(0,3900),parse_mode:"HTML",disable_web_page_preview:true,...extra};
  if(Number(m.message_thread_id)>0)destination.message_thread_id=m.message_thread_id;
  return tg("sendMessage",destination);
+}
+// Discover Telegram routing identifiers directly in ANY group/topic, including
+// groups not configured yet in Telegram Manager. No finance or membership data used.
+async function replyGroupAndTopicIds(m:any):Promise<boolean>{
+ const command=val(m?.text);
+ if(!/^\\/(?:groupid|topicid|chatid)(?:@\\w+)?$/i.test(command))return false;
+ if(m?.from?.is_bot)return true;
+ const type=val(m?.chat?.type);
+ if(type!=="group"&&type!=="supergroup"){
+  await reply(m,"🏦 Send <code>/groupid</code> inside the Telegram group or topic you want to map. I will reply with its Group ID and Topic ID.");
+  return true;
+ }
+ const chatId=val(m.chat.id),rawTopic=Number(m.message_thread_id||0);
+ const topic=Number.isSafeInteger(rawTopic)&&rawTopic>0?rawTopic:0;
+ const name=val(m.chat.title);
+ const title=name?"\\nGroup: <b>"+escape(name)+"</b>":"";
+ const answer="🏦 <b>BIG BROTHER — Telegram Routing IDs</b>"+title+
+  "\\n\\n📍 <b>Group ID</b>\\n<code>"+escape(chatId)+"</code>"+
+  "\\n\\n🧵 <b>Topic ID</b>\\n<code>"+topic+"</code>"+
+  (topic===0?"\\n<i>0 means this message has no separate topic ID (general group/chat).</i>":"")+
+  "\\n\\nCopy these values into Telegram Manager → Bank Assistant / Personal Review Routes.";
+ await reply(m,answer);
+ return true;
 }
 async function clearReplyMarkup(chatId:unknown,messageId:unknown){
  const chat=val(chatId),id=Number(messageId||0);
@@ -784,6 +808,8 @@ Deno.serve(async(req:Request)=>{
   try{await ensureTelegramCommands();}catch(e){console.warn("Telegram command menu setup failed",e instanceof Error?e.message:"error");}
   const u=await req.json(),m=u.message;
   if(m){
+    // Route discovery works before any Bank Assistant group/topic mapping exists.
+    if(await replyGroupAndTopicIds(m))return Response.json({ok:true});
     // Reply privately and stop; mapped group Bank Assistant handling remains untouched.
     if(await replyToPrivateIdentity(m))return Response.json({ok:true});
     if(m.chat?.type==="private"&&val(m.chat.id)===val(m.from?.id)&&
