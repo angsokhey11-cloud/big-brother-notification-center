@@ -444,6 +444,7 @@ async function takePendingBankAdd(m:any){
 }
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
+ if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  const bankAddReply=bankAddReplyData(m);
  const pendingBankAdd=bankAddReply?null:await takePendingBankAdd(m);
  if(/^\/(?:help|bankhelp)(?:@\w+)?$/i.test(t))return reply(m,
@@ -785,6 +786,11 @@ Deno.serve(async(req:Request)=>{
   if(m){
     // Reply privately and stop; mapped group Bank Assistant handling remains untouched.
     if(await replyToPrivateIdentity(m))return Response.json({ok:true});
+    if(m.chat?.type==="private"&&val(m.chat.id)===val(m.from?.id)&&
+     /^\/reviewtransaction(?:@\w+)?$/i.test(val(m.text))){
+      await beginBankTransactionReview(m,null);
+      return Response.json({ok:true});
+    }
     if(await invoicePhotoPrivate(m))return Response.json({ok:true});
     const scope=await bankScope(m);
     if(scope){
