@@ -57,7 +57,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
  <div class="small" id="customerHint"></div>
  <label for="payer">Bank Payer from Customer Directory</label><select id="payer"><option value="">Select payer</option></select>
  <p class="small" id="payerHint"></p>
- <button class="secondary wide" type="button" id="addPayer">+ Register Bank Payer to Customer Directory</button>
+ <button class="secondary wide hide" type="button" id="addPayer">+ Register Bank Payer to Customer Directory</button>
  <div class="grid">
   <div><label for="transaction">Transaction ID</label><input id="transaction" maxlength="160"></div>
   <div><label for="received">Received Date</label><input id="received" type="date"></div>
@@ -148,21 +148,50 @@ function describeCustomerMatch(invoice,payload,suggested){
  if(mapped.length>1)return "⚠️ Possible customers: "+mapped.map(c=>clean(c.customer_name||c.customer_id)+" ("+c.customer_id+")").join(" · ")+" — confirm customer before registering";
  return "⚠️ Customer: Not found in Customer Bank Directory — select a customer if this is a New Invoice";
 }
+function updatePayerRegistration(){
+ const cid=el("customer").value;
+ const selected=el("payer").value;
+ const list=identities.filter(x=>x.customer_id===cid&&x.active===true);
+ const exact=list.filter(x=>[x.account_holder_name,...(x.alternative_names||[])]
+   .some(name=>norm(name)===norm(current().sender_name)));
+ // A known payer or a deliberately selected existing payer never needs registration.
+ const needsNew=Boolean(cid)&&!selected&&exact.length===0;
+ el("addPayer").classList.toggle("hide",!needsNew);
+ el("addPayer").textContent=list.length?
+   "+ Add New Payer (sender not in directory)":
+   "+ Register Bank Payer for Customer";
+ if(!cid)el("payerHint").textContent="Choose the customer first.";
+ else if(selected)el("payerHint").textContent="✅ Using existing saved bank payer. No new payer registration is needed.";
+ else if(exact.length>1)el("payerHint").textContent="⚠️ Multiple saved payers match this sender. Select the correct bank account.";
+ else if(list.length)el("payerHint").textContent="⚠️ The customer has saved bank payers, but none matches this sender. Choose the correct existing payer or add a new one.";
+ else el("payerHint").textContent="⚠️ This customer has no saved bank payer yet.";
+ // Register Bank Payer popup only when explicitly reviewing a NEW invoice,
+ // the chosen customer has zero identities, and there is no saved payer.
+ if(choice==="new_invoice"&&needsNew&&list.length===0){
+  const key=current().draft_id+":"+cid;
+  if(popupShownFor!==key){
+   popupShownFor=key;
+   openPayer();
+  }
+ }
+}
 function populatePayers(){
  const cid=el("customer").value,previous=el("payer").value;
  el("payer").replaceChildren(new Option("Select bank payer",""));
- if(!cid){el("payerHint").textContent="Choose customer first.";return}
- const list=identities.filter(x=>x.customer_id===cid&&x.active);
+ const list=identities.filter(x=>x.customer_id===cid&&x.active===true);
  for(const x of list)el("payer").add(new Option(clean(x.account_holder_name)+" — "+x.bank_name,String(x.identity_id)));
- const matched=list.find(x=>[x.account_holder_name,...(x.alternative_names||[])].some(n=>norm(n)===norm(current().sender_name)));
- if(matched)el("payer").value=String(matched.identity_id);
- else if(list.some(x=>String(x.identity_id)===previous))el("payer").value=previous;
- else if(list.length===1)el("payer").value=String(list[0].identity_id);
- el("payerHint").textContent=list.length?"Check payer identity before saving.":"No saved bank payer. Register one for this customer.";
- if(!list.length&&popupShownFor!==current().draft_id+":"+cid){popupShownFor=current().draft_id+":"+cid;openPayer()}
+ const saved=current()?.review_payload?.payer_identity_id;
+ const exact=list.filter(x=>[x.account_holder_name,...(x.alternative_names||[])]
+   .some(name=>norm(name)===norm(current().sender_name)));
+ if(saved&&list.some(x=>String(x.identity_id)===String(saved)))el("payer").value=String(saved);
+ else if(previous&&list.some(x=>String(x.identity_id)===previous))el("payer").value=previous;
+ else if(exact.length===1)el("payer").value=String(exact[0].identity_id);
+ // Don't assign a mismatched account just because it is the customer's only payer.
+ updatePayerRegistration();
 }
 function setChoice(value){choice=value;
  el("newDetails").classList.toggle("hide",choice!=="new_invoice");
+ updatePayerRegistration();
  el("chooseNew").classList.toggle("active",choice==="new_invoice");
  el("chooseIgnore").classList.toggle("active",choice==="ignore");
  el("purposeHint").textContent=choice==="ignore"?"This transfer will not be registered or applied to any invoice.":
@@ -262,6 +291,7 @@ function openPayer(){
 }
 el("customerSearch").oninput=pickCustomerOptions;
 el("customer").onchange=populatePayers;
+el("payer").onchange=updatePayerRegistration;
 el("currency").onchange=setRate;el("invoiceCurrency").onchange=setRate;
 el("chooseNew").onclick=()=>setChoice("new_invoice");
 el("chooseIgnore").onclick=()=>setChoice("ignore");
