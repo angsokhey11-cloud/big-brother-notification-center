@@ -43,6 +43,111 @@ async function tgFile(fileId:string):Promise<Response>{
  if(content.byteLength>20_000_000)throw Error("Picture is too large");
  return new Response(content,{status:200,headers:{...cors,"content-type":mime,"content-length":String(content.byteLength)}});
 }
+const botToken=()=>Deno.env.get("TELEGRAM_BOT_TOKEN")||"";
+const tg=async(method:string,data:Record<string,unknown>)=>{
+ const res=await fetch("https://api.telegram.org/bot"+botToken()+"/"+method,{
+  method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(data)
+ });
+ const b=await res.json().catch(()=>null);
+ if(!res.ok||b?.ok!==true)throw Error("Telegram "+method+" failed: "+val(b?.description).slice(0,140));
+ return b.result;
+};
+const sortInvoice=(a:any,b:any)=>val(a.invoice_date).localeCompare(val(b.invoice_date))||
+ // BigInt preserves numeric ordering and leading zeros stay intact as strings.
+ (BigInt(val(a.invoice_no))<BigInt(val(b.invoice_no))?-1:BigInt(val(a.invoice_no))>BigInt(val(b.invoice_no))?1:0)||
+ Number(a.source_message_id)-Number(b.source_message_id);
+async function deliverBatch(batchId:string,reviewer:string){
+ const client=db();
+ const {data:batch,error:be}=await client.from("bb_invoice_photo_review_batches").select("*")
+  .eq("batch_id",batchId).eq("reviewer_telegram_user_id",reviewer).maybeSingle();
+ if(be||!batch||!["approved","delivering","failed"].includes(batch.status))throw Error("Approved review batch not available");
+ const {data:photos,error:pe}=await client.from("bb_invoice_photo_queue").select("queue_id,source_message_id,telegram_file_id,invoice_no,invoice_date,review_state")
+   .eq("review_batch_id",batchId).order("source_message_id").limit(300);
+ if(pe||!photos?.length)throw Error("No invoice photos in this batch");
+ if(photos.some((x:any)=>x.review_state!=="confirmed"||!x.invoice_no||!x.invoice_date))
+   throw Error("Unverified pictures cannot be delivered");
+ const ordered=[...photos].sort(sortInvoice);
+ const {data:destinations,error:de}=await client.from("bb_invoice_photo_destinations")
+  .select("destination_id,destination_label,telegram_chat_id,telegram_thread_id,active")
+  .eq("route_id",batch.route_id).eq("active",true).order("destination_id");
+ if(de||!destinations?.length)throw Error("No delivery destinations configured");
+ const privateOk=destinations.some((x:any)=>val(x.telegram_chat_id)===reviewer&&Number(x.telegram_thread_id)===0);
+ const groupOk=destinations.some((x:any)=>val(x.telegram_chat_id).startsWith("-"));
+ if(!privateOk||!groupOk)throw Error("Both a group/topic and your private chat must be mapped before delivery");
+ const albums:Array<any[]>=[];
+ for(let i=0;i<ordered.length;i+=10)albums.push(ordered.slice(i,i+10));
+ for(const d of destinations){
+  for(let i=0;i<albums.length;i++){
+   const {error:insertError}=await client.from("bb_invoice_photo_delivery_albums")
+    .upsert({batch_id:batchId,destination_id:d.destination_id,album_index:i,status:"pending"},
+       {onConflict:"batch_id,destination_id,album_index",ignoreDuplicates:true});
+   if(insertError)throw insertError;
+  }
+ }
+ const {error:inProgress}=await client.from("bb_invoice_photo_review_batches")
+  .update({status:"delivering",delivery_started_at:new Date().toISOString(),delivery_error:null})
+  .eq("batch_id",batchId);
+ if(inProgress)throw inProgress;
+ let sent=0,failed=0,ambiguous=0;
+ for(const d of destinations){
+  for(let i=0;i<albums.length;i++){
+   const {data:row,error:readError}=await client.from("bb_invoice_photo_delivery_albums")
+    .select("status").eq("batch_id",batchId).eq("destination_id",d.destination_id).eq("album_index",i).single();
+   if(readError)throw readError;
+   if(row.status==="sent")continue;
+   if(row.status==="sending"){ambiguous++;continue;}
+   const {data:claimed,error:claimErr}=await client.from("bb_invoice_photo_delivery_albums")
+     .update({status:"sending",error_text:null,updated_at:new Date().toISOString()})
+     .eq("batch_id",batchId).eq("destination_id",d.destination_id).eq("album_index",i)
+     .in("status",["pending","failed"]).select("status");
+   if(claimErr)throw claimErr;
+   if(!claimed?.length){ambiguous++;continue;}
+   const parts=albums[i];
+   const dst:Record<string,unknown>={chat_id:d.telegram_chat_id};
+   if(Number(d.telegram_thread_id)>0)dst.message_thread_id=d.telegram_thread_id;
+   try{
+    // Original Telegram photo IDs: no redrawing, no cropping risk, no image blobs persisted.
+    const caption=(x:any)=>"🧾 "+val(x.invoice_no)+" • "+val(x.invoice_date);
+    let result:any;
+    if(parts.length===1)result=await tg("sendPhoto",{...dst,photo:parts[0].telegram_file_id,caption:caption(parts[0])});
+    else result=await tg("sendMediaGroup",{...dst,media:parts.map((x:any)=>({type:"photo",media:x.telegram_file_id,caption:caption(x)}))});
+    const mids=(Array.isArray(result)?result:[result]).map((x:any)=>x?.message_id).filter((x:any)=>Number.isSafeInteger(x));
+    const {error:okError}=await client.from("bb_invoice_photo_delivery_albums")
+      .update({status:"sent",telegram_message_ids:mids,updated_at:new Date().toISOString()})
+      .eq("batch_id",batchId).eq("destination_id",d.destination_id).eq("album_index",i);
+    if(okError)throw okError;
+    sent++;
+   }catch(e){
+    failed++;
+    const message=e instanceof Error?e.message:"Unable to send album";
+    // A transport timeout can be ambiguous: mark as sending, do not automatically duplicate.
+    const uncertain=/fetch failed|network|timeout|connection|internal server/i.test(message);
+    await client.from("bb_invoice_photo_delivery_albums").update({status:uncertain?"sending":"failed",error_text:message.slice(0,200),updated_at:new Date().toISOString()})
+     .eq("batch_id",batchId).eq("destination_id",d.destination_id).eq("album_index",i);
+    console.error("Invoice album delivery failed",message);
+    if(uncertain)ambiguous++;
+   }
+  }
+ }
+ const {data:pending,error:pendingError}=await client.from("bb_invoice_photo_delivery_albums")
+  .select("status").eq("batch_id",batchId).neq("status","sent");
+ if(pendingError)throw pendingError;
+ if(!pending?.length){
+  // Drop all private processing metadata on verified delivery to all targets.
+  await tg("sendMessage",{chat_id:reviewer,text:"✅ BIG BROTHER — Invoice photo albums delivered to your mapped group/topic and private chat. Temporary review files are now cleared."}).catch(()=>{});
+  const {error:cleanup}=await client.from("bb_invoice_photo_review_batches").delete().eq("batch_id",batchId);
+  if(cleanup)throw cleanup;
+  return {ok:true,completed:true,sent};
+ }
+ await client.from("bb_invoice_photo_review_batches").update({
+    status:"failed",delivery_error:ambiguous?
+       "At least one album delivery is uncertain. Contact admin before resending.":
+       failed+" album delivery attempts failed; successful albums will not be resent."
+ }).eq("batch_id",batchId);
+ await tg("sendMessage",{chat_id:reviewer,text:"⚠️ BIG BROTHER invoice delivery needs attention. Some destinations failed. Previously delivered albums will not be sent again. Reopen /review to check details."}).catch(()=>{});
+ return {ok:false,completed:false,sent,failed,ambiguous};
+}
+
 Deno.serve(async(req:Request)=>{
  if(req.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
  if(req.method!=="POST")return response({error:"POST required"},405);
@@ -57,8 +162,8 @@ Deno.serve(async(req:Request)=>{
   const action=val(body.action);
   const getBatch=async(batchId:unknown)=>{
     const id=val(batchId);
-    const q=client.from("bb_invoice_photo_review_batches").select("batch_id,route_id,status,created_at,expires_at").eq("reviewer_telegram_user_id",user).in("route_id",routeIds).gt("expires_at",new Date().toISOString());
-    const {data,error}=id?await q.eq("batch_id",id).maybeSingle():await q.in("status",["collecting","awaiting_review"]).order("created_at",{ascending:false}).limit(1).maybeSingle();
+    const q=client.from("bb_invoice_photo_review_batches").select("batch_id,route_id,status,created_at,expires_at,delivery_error").eq("reviewer_telegram_user_id",user).in("route_id",routeIds).gt("expires_at",new Date().toISOString());
+    const {data,error}=id?await q.eq("batch_id",id).maybeSingle():await q.in("status",["collecting","awaiting_review","approved","delivering","failed"]).order("created_at",{ascending:false}).limit(1).maybeSingle();
     if(error)throw error;
     if(!data)throw Error("No active review batch found");
     return data;
@@ -69,6 +174,33 @@ Deno.serve(async(req:Request)=>{
     const {data,error}=await client.from("bb_invoice_photo_queue").select("queue_id,source_message_id,review_state,invoice_no,invoice_date,received_at").eq("review_batch_id",batch.batch_id).order("source_message_id",{ascending:true}).limit(300);
     if(error)throw error;
     return response({ok:true,batch,items:data||[],delivery_connected:false});
+  }
+  if(action==="approve"||action==="retry"){
+    const batch=await getBatch(body.batch_id);
+    if(action==="approve"&&batch.status!=="awaiting_review")return response({error:"Review batch is not awaiting approval"},409);
+    if(action==="retry"&&batch.status!=="failed")return response({error:"Only failed delivery attempts may be retried"},409);
+    const {data:photos,error:pe}=await client.from("bb_invoice_photo_queue")
+      .select("review_state,invoice_no,invoice_date,confirmed_by_telegram_user_id")
+      .eq("review_batch_id",batch.batch_id);
+    if(pe)throw pe;
+    if(!photos?.length||photos.some((x:any)=>x.review_state!=="confirmed"||!x.invoice_no||!x.invoice_date||x.confirmed_by_telegram_user_id!==user))
+      return response({error:"Every invoice number and date must be confirmed by you before sending"},409);
+    const {data:destinations,error:de}=await client.from("bb_invoice_photo_destinations")
+      .select("telegram_chat_id,telegram_thread_id").eq("route_id",batch.route_id).eq("active",true);
+    if(de)throw de;
+    if(!destinations?.some((x:any)=>val(x.telegram_chat_id)===user&&Number(x.telegram_thread_id)===0)
+     ||!destinations?.some((x:any)=>val(x.telegram_chat_id).startsWith("-")))
+       return response({error:"Map both your group/topic and private chat before approving"},409);
+    if(action==="approve"){
+      const {data:approved,error:ae}=await client.from("bb_invoice_photo_review_batches")
+        .update({status:"approved",approved_at:new Date().toISOString(),approved_by_telegram_user_id:user})
+        .eq("batch_id",batch.batch_id).eq("status","awaiting_review").select("batch_id");
+      if(ae)return response({error:ae.message},409);
+      if(!approved?.length)return response({error:"Batch already approved or changed"},409);
+    }
+    // Delivery is awaited for small collections and retains per-album status for safe retries.
+    const outcome=await deliverBatch(batch.batch_id,user);
+    return response(outcome,outcome.ok?200:207);
   }
   if(!["save","photo"].includes(action))return response({error:"Unsupported operation"},400);
   const batch=await getBatch(body.batch_id);
