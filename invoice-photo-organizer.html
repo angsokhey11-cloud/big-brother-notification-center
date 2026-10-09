@@ -25,7 +25,7 @@ code{color:#a9d9ff}.hidden{display:none!important}
 <a class="back" href="./">← Telegram Manager</a>
 <p class="small">BIG BROTHER · TELEGRAM MANAGER</p>
 <h1>📸 Invoice Photo Organizer</h1>
-<p>Map a source group, topic, or private chat to multiple destinations. Every invoice photo requires your private manual confirmation of its date and number before delivery. No chat IDs are hard-coded in the bot.</p>
+<p>Forward only your selected invoice pictures to the BIG BROTHER bot <strong>in your private Telegram chat</strong>. Review every invoice before sending the finished albums to mapped groups, topics and your own private chat. No group photos are collected automatically.</p>
 <section class="panel">
 <h2>Current setup</h2>
 <p class="warn"><strong>Configuration stage:</strong> Photo intake, private review conversations, image correction, and album delivery are not activated yet. Existing Bank Assistant remains unchanged. Mapping is ready for manual-review workflow development.</p>
@@ -33,26 +33,24 @@ code{color:#a9d9ff}.hidden{display:none!important}
 <div class="toolbar"><button id="refresh" class="secondary">Refresh mappings</button><span class="chip" id="queueCount">Temporary queue: —</span></div>
 </section>
 <section class="panel">
-<h2>1. Incoming photo source</h2>
-<p>Choose where staff send invoice pictures. Topic ID 0 means a normal group or private chat. <strong>Mandatory manual review:</strong> you assign the date and invoice number to every photo in your private Telegram chat. The bot never auto-approves OCR results.</p>
+<h2>1. Private forwarded-photo intake</h2>
+<p>The source is always the authorized reviewer's <strong>private chat with the bot</strong>. Forward your chosen invoice pictures there; other Telegram groups and topics are never watched for this function. <strong>Mandatory manual review:</strong> you confirm the date and number of every photo before any album is delivered.</p>
 <form id="sourceForm">
 <input type="hidden" id="sourceId"/>
 <div class="grid">
-<div><label for="sourceLabel">Source label</label><input id="sourceLabel" maxlength="120" required placeholder="Sales invoice photo group"/></div>
-<div><label for="sourceChat">Source Group / Chat ID</label><input id="sourceChat" required inputmode="text" placeholder="-1001234567890 or private chat ID"/></div>
-<div><label for="sourceThread">Source Topic ID (optional)</label><input id="sourceThread" type="number" step="1" min="0" value="0" required/></div>
-<div><label for="sourceIdle">Collect photos until idle (seconds)</label><input id="sourceIdle" type="number" step="1" min="15" max="600" value="60" required/></div>
-<div><label for="reviewerUser">Private reviewer Telegram User ID</label><input id="reviewerUser" required inputmode="numeric" pattern="[0-9]{5,20}" placeholder="Your personal Telegram numeric User ID"/></div>
-<div><label>Verification policy</label><div class="status"><strong>Manual confirmation required for EVERY photo</strong><div class="small">No OCR auto-approval. You decide both the invoice number and date before sending.</div></div></div>
+<div><label for="sourceLabel">Private organizer name</label><input id="sourceLabel" maxlength="120" required placeholder="My invoice organizer"/></div>
+<div><label for="sourceIdle">Auto-create review after last forwarded photo (seconds)</label><input id="sourceIdle" type="number" step="1" min="15" max="600" value="60" required/></div>
+<div><label for="reviewerUser">Authorized private forwarding / reviewer Telegram User ID</label><input id="reviewerUser" required inputmode="numeric" pattern="[0-9]{5,20}" placeholder="Your personal Telegram numeric User ID"/></div>
+<div><label>Privacy and verification</label><div class="status"><strong>Private forwarded photos only · Manual review of EVERY photo</strong><div class="small">No group intake and no automatic invoice approval. You confirm each invoice number and date.</div></div></div>
 </div>
 <div class="toolbar"><button type="submit">Save source</button><button type="button" id="clearSource" class="secondary">New source</button></div>
 </form>
-<p class="small">After collecting a batch, the bot will send this private reviewer a task covering <strong>every original photo</strong>. For each invoice, you enter the exact printed number and written date. A final batch summary lets you correct any entry, then approve sending. No questions appear in staff groups. To find your numeric User ID, send <code>/myid</code> to the existing Bank Assistant topic, then privately open the bot and press <strong>Start</strong>.</p>
+<p class="small">After you forward a set of pictures directly into the private bot chat, the bot will prepare one review task covering <strong>every forwarded photo</strong>. You'll confirm each number and date, then approve the final sorted batch. Group chat photos are ignored. To find your numeric Telegram User ID, send <code>/myid</code> to the existing Bank Assistant topic, then privately open the bot and press <strong>Start</strong>.</p>
 <h2 style="margin-top:26px">Saved sources</h2><div id="sources"></div>
 </section>
 <section class="panel">
-<h2>2. Delivery destinations</h2>
-<p>Add multiple destinations to a source: group, topic, or private chat. The same sorted albums (up to 10 original corrected pictures each) will be sent to every active destination.</p>
+<h2>2. Delivery destinations — group and private</h2>
+<p>The inputs above are private-only. Here, map the <strong>group/topic</strong> and your <strong>private chat</strong> as active delivery destinations. Your approved corrected photos will be sent to both in Telegram albums (up to 10 separate pictures per album). Nothing is sent before your approval.</p>
 <form id="destForm">
 <input type="hidden" id="destId"/>
 <div class="grid">
@@ -67,11 +65,11 @@ code{color:#a9d9ff}.hidden{display:none!important}
 <h2 style="margin-top:26px">Saved destinations</h2><div id="destinations"></div>
 </section>
 <section class="panel">
-<h2>3. Manual private review workflow (planned)</h2>
-<p>Staff sends original invoice photos → bot collects a batch → bot sends a private review task for <strong>every photo</strong> → you enter or edit the printed invoice number and date for each → bot shows an editable summary → <strong>you explicitly approve the complete batch</strong> → bot corrects the original photographs without recreating their content → sorts by confirmed date and number → sends albums to both mapped group and private chat → deletes its temporary file references and working copies.</p>
+<h2>3. Private forwarding and review workflow (planned)</h2>
+<p><strong>You forward only the relevant invoice photos into your private bot conversation</strong> → bot collects that private batch → creates a private review task for every forwarded invoice → you enter or edit the printed invoice number and date for each → bot shows an editable summary → <strong>you explicitly approve the whole batch</strong> → bot carefully corrects the original photographs without recreating their content → sorts by confirmed date and number → sends albums to your mapped group/topic and private chat → deletes temporary file references and working copies.</p>
 <p><strong>Example private task:</strong> 📸 14 photos received. Review 1/14. The bot shows the original picture; you reply <code>002351 | 07/10/2026</code>. Use Next/Previous/Edit to verify the rest, then select <strong>Approve &amp; Send</strong> after all 14 are checked.</p>
 <p><strong>Privacy and safety:</strong> No correction questions in the staff group; no delivery until ALL photos are confirmed by the assigned private reviewer. Metadata is used to sort, not to alter handwriting on the image. Temporary pending reviews have a planned 24-hour expiry; the review bot will need expiry reminders and failure handling before activation.</p>
-<p>Map the <strong>group/topic and your private chat as active destinations</strong> so finished pictures go to both places. For private destinations and the reviewer chat, first open the bot and press <strong>Start</strong>. The bot must be able to receive photos in the source group. Illegible dates/numbers will be held for private review.</p>
+<p>Configure both the <strong>delivery group/topic</strong> and <strong>your private chat</strong> as enabled output destinations. Open the private bot chat and press <strong>Start</strong> before forwarding. The bot does not need to read group pictures; it only needs permission to <strong>post</strong> the completed pictures to mapped group/topic destinations. The image processor and webhook intake are not active yet.</p>
 </section>
 </main>
 <script src="https://angsokhey11-cloud.github.io/big-brother-admin-work/supabase-admin-work-adapter.js"></script>
@@ -94,13 +92,13 @@ async function call(action,extra={}){
 }
 function render(){
  $('queueCount').textContent='Temporary queue: 0 images stored';
- const routeChoices=routes.map(r=>'<option value="'+r.route_id+'">'+esc(r.route_label)+' ('+esc(r.source_chat_id)+')</option>').join('');
+ const routeChoices=routes.map(r=>'<option value="'+r.route_id+'">'+esc(r.route_label)+' (private)</option>').join('');
  const previous=$('destRoute').value;
  $('destRoute').innerHTML='<option value="">Select a source…</option>'+routeChoices;
  if(routes.some(r=>String(r.route_id)===previous))$('destRoute').value=previous;
  $('sources').innerHTML=routes.length?routes.map(r=>
   '<div class="row"><h3>'+esc(r.route_label)+' <span class="chip">Not active</span></h3>'+
-  '<p>Source: <code>'+esc(r.source_chat_id)+'</code> · Topic: '+esc(r.source_thread_id)+' · Idle: '+esc(r.idle_seconds)+'s · Reviewer: <code>'+esc(r.reviewer_telegram_user_id||'Not set')+'</code> · Verification: <strong>Manual review for every photo</strong></p>'+
+  '<p>Private intake/reviewer: <code>'+esc(r.reviewer_telegram_user_id||'Not set')+'</code> · Auto-review idle: '+esc(r.idle_seconds)+'s · Intake: <strong>Only pictures forwarded privately</strong> · Verification: <strong>Manual review of every photo</strong></p>'+
   '<div class="toolbar"><button type="button" class="secondary" data-route-edit="'+r.route_id+'">Edit</button>'+ 
   '<button type="button" class="secondary" data-reviewer-test="'+r.route_id+'">Test private reviewer</button>'+
   '<button type="button" class="danger" data-route-remove="'+r.route_id+'">Delete</button></div></div>'
@@ -118,12 +116,12 @@ async function load(){
  try{status('Loading current mappings…');const r=await call('list');routes=r.routes;destinations=r.destinations;render();$('queueCount').textContent='Temporary queue: '+r.queued+' references';status('✅ Admin routing loaded. Processing remains inactive until the image worker is tested.')}
  catch(e){status(e.message,true)}
 }
-function resetSource(){$('sourceForm').reset();$('sourceId').value='';$('sourceThread').value=0;$('sourceIdle').value=60}
+function resetSource(){$('sourceForm').reset();$('sourceId').value='';$('sourceIdle').value=60}
 function resetDest(){$('destForm').reset();$('destId').value='';$('destThread').value=0}
 $('refresh').onclick=load;$('clearSource').onclick=resetSource;$('clearDest').onclick=resetDest;
 $('sourceForm').onsubmit=async e=>{
  e.preventDefault();try{
-  await call('route_save',{route_id:$('sourceId').value||null,route_label:$('sourceLabel').value,source_chat_id:$('sourceChat').value.trim(),source_thread_id:Number($('sourceThread').value),idle_seconds:Number($('sourceIdle').value),reviewer_telegram_user_id:$('reviewerUser').value.trim()});
+  await call('route_save',{route_id:$('sourceId').value||null,route_label:$('sourceLabel').value,idle_seconds:Number($('sourceIdle').value),reviewer_telegram_user_id:$('reviewerUser').value.trim()});
   resetSource();await load();status('✅ Source saved (inactive until the processor is verified).');
  }catch(err){status(err.message,true)}
 };
@@ -136,8 +134,8 @@ $('destForm').onsubmit=async e=>{
 $('sources').onclick=async e=>{
  const edit=e.target.closest('[data-route-edit]'),remove=e.target.closest('[data-route-remove]'),test=e.target.closest('[data-reviewer-test]');
  if(edit){const r=routes.find(x=>String(x.route_id)===edit.dataset.routeEdit);if(!r)return;
-  $('sourceId').value=r.route_id;$('sourceLabel').value=r.route_label;$('sourceChat').value=r.source_chat_id;
-  $('sourceThread').value=r.source_thread_id;$('sourceIdle').value=r.idle_seconds;$('reviewerUser').value=r.reviewer_telegram_user_id||'';$('sourceForm').scrollIntoView({behavior:'smooth'});}
+  $('sourceId').value=r.route_id;$('sourceLabel').value=r.route_label;
+  $('sourceIdle').value=r.idle_seconds;$('reviewerUser').value=r.reviewer_telegram_user_id||'';$('sourceForm').scrollIntoView({behavior:'smooth'});}
  if(test){if(!confirm('Send a harmless test message to the mapped private reviewer?'))return;
   try{await call('reviewer_test',{route_id:Number(test.dataset.reviewerTest)});status('✅ Private reviewer test delivered.')}catch(err){status(err.message,true)}}
  if(remove){if(!confirm('Delete this source and all its destination mappings?'))return;
