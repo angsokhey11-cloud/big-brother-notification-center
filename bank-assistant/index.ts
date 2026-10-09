@@ -455,13 +455,13 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
  const t=val(m.text);
  const start=/^\/start(?:@\w+)?(?:\s+\S{1,64})?$/i.test(t);
  const myid=/^\/myid(?:@\w+)?$/i.test(t)||/^(?:id|my id)$/i.test(t);
- const status=/^(?:\/photostatus(?:@\w+)?|photo|photo status|organizer)$/i.test(t);
+ const status=/^(?:\/(?:photo|photostatus)(?:@\w+)?|photo|photo status|organizer)$/i.test(t);
  const test=/^(?:\/phototest(?:@\w+)?|photo test)$/i.test(t);
  if(!start&&!myid&&!status&&!test)return false;
  if(start||myid){
    const message=(start?"👋 <b>Welcome to BIG BROTHER Bot!</b>\n\n":"")
      +"🪪 <b>Your Telegram User ID</b>\n<code>"+escape(id)+"</code>\n\n"
-     +"To check your private invoice-review mapping, send <code>PHOTO</code> or <code>/photostatus</code>.\n"
+     +"To check your private invoice-review mapping, send <code>/photo</code>, <code>PHOTO</code>, or <code>/photostatus</code>.\n"
      +"To test your mapped delivery destinations, send <code>/phototest</code>.\n\n"
      +"📸 Invoice forwarding, photo review and album delivery are not yet active.";
    await reply(m,message);
