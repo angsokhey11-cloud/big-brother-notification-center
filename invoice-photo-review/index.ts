@@ -6,7 +6,7 @@ const val=(s:unknown)=>String(s??"").trim();
 const db=()=>createClient(Deno.env.get("SUPABASE_URL")||"",Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"",{auth:{persistSession:false}});
 const bytes=new TextEncoder();
 async function hmac(key:Uint8Array|ArrayBuffer,data:string){
- const k=await crypto.subtle.importKey("raw",key,"HMAC",false,["sign"]);
+ const k=await crypto.subtle.importKey("raw",key,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
  return new Uint8Array(await crypto.subtle.sign("HMAC",k,bytes.encode(data)));
 }
 function hex(a:Uint8Array){return Array.from(a,b=>b.toString(16).padStart(2,"0")).join("");}
