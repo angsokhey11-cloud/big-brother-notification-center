@@ -523,7 +523,7 @@ async function initialize(){
   session=getSession();
   if(!session?.access_token){section("login");return}
   const result=await call("load");
-  batch=result.batch;items=result.items||[];
+  batch=result.batch;items=(result.items||[]).slice().sort((a,b)=>Number(a.source_message_id)-Number(b.source_message_id)||String(a.draft_id).localeCompare(String(b.draft_id)));
   if(batch.status==="completed"){section("complete");el("completeTitle").textContent="✅ Review completed";el("completeText").textContent="This batch is already complete.";return}
    if(batch.status==="cancelled"){section("complete");el("completeTitle").textContent="🚫 Review cancelled";el("completeText").textContent="This test batch was cancelled. Its bank notices will not re-enter review and nothing was registered. Forward fresh bank notices, then run /reviewtransaction.";return}
   const [cs,ids,locs]=await Promise.all([
