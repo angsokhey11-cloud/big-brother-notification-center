@@ -128,8 +128,15 @@ function getSession(){try{return JSON.parse(localStorage.getItem(sessionKey)||"n
 function putSession(value){session=value;if(value?.expires_in&&!value.expires_at)value.expires_at=Math.floor(Date.now()/1000)+Number(value.expires_in);try{localStorage.setItem(sessionKey,JSON.stringify(value))}catch{}}
 function forget(){session=null;try{localStorage.removeItem(sessionKey)}catch{}}
 async function decode(res){const result=await res.json().catch(()=>({}));if(!res.ok||result.ok===false)throw Error(result.message||result.error||"Request failed ("+res.status+")");return result}
-async function refresh(){if(!session?.refresh_token)throw Error("Log in to BIG BROTHER again.");
- const res=await fetch(endpoint+"/auth/v1/token?grant_type=refresh_token",{method:"POST",headers:{"content-type":"application/json",apikey:key},body:JSON.stringify({refresh_token:session.refresh_token})});putSession(await decode(res))}
+async function refresh(){
+ if(!session?.refresh_token){forget();throw Error("Admin login session expired. Sign in again.");}
+ const res=await fetch(endpoint+"/auth/v1/token?grant_type=refresh_token",{method:"POST",headers:{"content-type":"application/json",apikey:key},body:JSON.stringify({refresh_token:session.refresh_token})});
+ if(res.status===400||res.status===401||res.status===403){
+  forget();
+  throw Error("Admin login session expired. Sign in again.");
+ }
+ putSession(await decode(res));
+}
 async function token(){if(!session)session=getSession();if(!session?.access_token)throw Error("Admin login required");
  if(session.expires_at&&Number(session.expires_at)<Math.floor(Date.now()/1000)+40)await refresh();return session.access_token}
 async function rpc(name,args={}){let jwt=await token();const request=t=>fetch(endpoint+"/rest/v1/rpc/"+name,{method:"POST",headers:{apikey:key,authorization:"Bearer "+t,"content-type":"application/json"},body:JSON.stringify(args)});
