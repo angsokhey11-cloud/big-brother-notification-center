@@ -66,7 +66,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
  <button class="secondary wide hide" type="button" id="addPayer">+ Register Bank Payer to Customer Directory</button>
  <div class="grid">
   <div><label for="transaction">Transaction ID</label><input id="transaction" maxlength="160"></div>
-  <div><label for="received">Received Date</label><input id="received" type="date"></div>
+  <div><label for="received">Received Date</label><input id="received" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" autocomplete="off"></div>
   <div><label for="amount">Actual Bank Amount</label><input id="amount" type="number" step=".0001" min=".0001"></div>
   <div><label for="currency">Bank Currency</label><select id="currency"><option>USD</option><option>KHR</option></select></div>
   <div><label for="invoiceCurrency">New Invoice Currency</label><select id="invoiceCurrency"><option>USD</option><option>KHR</option></select></div>
@@ -122,6 +122,19 @@ function clear(){el("alert").classList.add("hide")}
 function money(x){const n=Number(x);return Number.isFinite(n)?n.toLocaleString("en-US",{maximumFractionDigits:4}):clean(x)}
 function norm(x){return clean(x).normalize("NFKC").toLowerCase().replace(/[.,\-_]/g," ").replace(/\s+/g," ")}
 function today(){return new Date(Date.now()+7*3600000).toISOString().slice(0,10)}
+function displayBankDate(value){
+ const v=clean(value),m=v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+ return m?m[3]+"/"+m[2]+"/"+m[1]:v;
+}
+function storageBankDate(value){
+ const v=clean(value),m=v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+ if(!m)throw Error("Received Date must be DD/MM/YYYY.");
+ const iso=m[3]+"-"+m[2]+"-"+m[1];
+ const d=new Date(iso+"T00:00:00Z");
+ if(Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==iso||iso>today())
+  throw Error("Check the bank transaction Received Date (DD/MM/YYYY).");
+ return iso;
+}
 function current(){return items[index]}
 function reviewed(){return items.filter(x=>x.review_decision==="ignore"||(x.review_decision==="new_invoice"&&x.review_payload)).length}
 function getSession(){try{return JSON.parse(localStorage.getItem(sessionKey)||"null")}catch{return null}}
@@ -291,7 +304,7 @@ function render(){
  const possible=payload.customer_id|| (suggested.length===1?suggested[0]:"");
  el("customer").value=possible;
  el("transaction").value=payload.transaction_id||i.transaction_id||"";
- el("received").value=payload.received_date||i.received_date||today();
+ el("received").value=displayBankDate(payload.received_date||i.received_date||"");
  el("amount").value=payload.amount??i.amount??"";
  el("currency").value=payload.currency||i.currency||"USD";
  el("invoiceCurrency").value=payload.invoice_currency||el("currency").value;
@@ -310,7 +323,7 @@ function render(){
 function details(){
  const cid=el("customer").value,tid=clean(el("transaction").value).toUpperCase(),pid=Number(el("payer").value);
  const a=Number(el("amount").value),cur=el("currency").value,inv=el("invoiceCurrency").value,rate=cur===inv?1:Number(el("rate").value);
- const date=el("received").value;
+ const date=storageBankDate(el("received").value);
  if(!cid||!Number.isSafeInteger(pid)||pid<1)throw Error("Select a customer and an active bank payer. Use Register Bank Payer if missing.");
  if(!tid||tid.length>160)throw Error("Enter an actual bank transaction ID (not an invoice number).");
  if(!Number.isFinite(a)||a<=0)throw Error("Check actual bank amount.");
