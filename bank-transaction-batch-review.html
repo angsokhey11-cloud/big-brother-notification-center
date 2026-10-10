@@ -61,7 +61,8 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
  <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Search customer name, ID, or location…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
  <label for="customer">Customer</label><select id="customer"><option value="">Select customer</option></select>
  <div class="small" id="customerHint"></div>
- <label for="payer">Bank Payer from Customer Directory</label><select id="payer"><option value="">Select payer</option></select>
+ <label style="display:flex;align-items:center;gap:8px;margin:12px 0"><input id="skipPayer" type="checkbox" style="width:20px;min-height:20px" checked> Do not add sender to Customer Bank Directory</label>
+ <label for="payer">Bank Payer from Customer Directory (optional)</label><select id="payer"><option value="">Select payer</option></select>
  <p class="small" id="payerHint"></p>
  <button class="secondary wide hide" type="button" id="addPayer">+ Register Bank Payer to Customer Directory</button>
  <div class="grid">
@@ -229,6 +230,9 @@ function describeCustomerMatch(invoice,payload,suggested){
  return "⚠️ Customer: Not found in Customer Bank Directory — select a customer if this is a New Invoice";
 }
 function updatePayerRegistration(){
+ const skip=el("skipPayer").checked;
+ el("payer").disabled=skip;
+ if(skip){el("addPayer").classList.add("hide");el("payerHint").textContent="✅ Transaction-only sender. No Customer Bank Directory entry will be created.";return;}
  const cid=el("customer").value;
  const selected=el("payer").value;
  const list=identities.filter(x=>x.customer_id===cid&&x.active===true);
@@ -247,7 +251,7 @@ function updatePayerRegistration(){
  else el("payerHint").textContent="⚠️ This customer has no saved bank payer yet.";
  // Register Bank Payer popup only when explicitly reviewing a NEW invoice,
  // the chosen customer has zero identities, and there is no saved payer.
- if(choice==="new_invoice"&&needsNew&&list.length===0){
+ if(choice==="new_invoice"&&needsNew&&list.length===0&&!el("skipPayer").checked){
   const key=current().draft_id+":"+cid;
   if(popupShownFor!==key){
    popupShownFor=key;
@@ -292,6 +296,7 @@ function render(){
  if(!items.length){section("complete");el("completeText").textContent="No bank transactions in this batch.";return}
  section("review");clear();clearSaveFeedback();
  const i=current(),payload=i.review_payload||{},suggested=matchingCustomer(i.sender_name);
+ el("skipPayer").checked=payload.payer_identity_id==null;
  el("mode").textContent=batch?.status==="processing"?"Finalizing":"Private review";
  el("counter").textContent="Transaction "+(index+1)+" of "+items.length;
  el("checked").textContent=reviewed()+"/"+items.length+" reviewed";
@@ -324,12 +329,13 @@ function details(){
  const cid=el("customer").value,tid=clean(el("transaction").value).toUpperCase(),pid=Number(el("payer").value);
  const a=Number(el("amount").value),cur=el("currency").value,inv=el("invoiceCurrency").value,rate=cur===inv?1:Number(el("rate").value);
  const date=storageBankDate(el("received").value);
- if(!cid||!Number.isSafeInteger(pid)||pid<1)throw Error("Select a customer and an active bank payer. Use Register Bank Payer if missing.");
+ const skip=el("skipPayer").checked;
+ if(!cid||(!skip&&(!Number.isSafeInteger(pid)||pid<1)))throw Error("Select a customer and an active bank payer, or choose transaction-only sender.");
  if(!tid||tid.length>160)throw Error("Enter an actual bank transaction ID (not an invoice number).");
  if(!Number.isFinite(a)||a<=0)throw Error("Check actual bank amount.");
  if(!Number.isFinite(rate)||rate<=0||(cur!==inv&&rate<=1))throw Error("Valid KHR per USD rate required.");
  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>today())throw Error("Choose the correct bank received date.");
- return {customer_id:cid,transaction_id:tid,payer_identity_id:pid,amount:a,currency:cur,invoice_currency:inv,
+ return {customer_id:cid,transaction_id:tid,payer_identity_id:skip?null:pid,payer_name:clean(current().sender_name),amount:a,currency:cur,invoice_currency:inv,
  exchange_rate:rate,received_date:date,bank_name:clean(el("bankName").value)};
 }
 async function save(){
@@ -434,6 +440,7 @@ el("customer").onchange=()=>{
  if(c)el("customerMatch").textContent="👤 Customer: "+clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · "+customerLocationText(c)+" · Selected for this transaction";
 };
 el("payer").onchange=updatePayerRegistration;
+el("skipPayer").onchange=updatePayerRegistration;
 el("currency").onchange=setRate;el("invoiceCurrency").onchange=setRate;
 el("chooseNew").onclick=()=>setChoice("new_invoice");
 el("chooseIgnore").onclick=()=>setChoice("ignore");
@@ -510,10 +517,10 @@ el("approve").onclick=async()=>{
    let marked=false;
    try{await call("record",{draft_id:item.draft_id});marked=true;}catch(_){}
    if(!marked){
-    const result=await rpc("bb_bank_register_invoice_tx_v4",{
+    const result=await rpc(p.payer_identity_id==null?"bb_bank_register_invoice_tx_no_directory":"bb_bank_register_invoice_tx_v4",{
      p_customer_id:p.customer_id,p_transaction_id:p.transaction_id,p_amount:p.amount,
      p_currency:p.currency,p_invoice_currency:p.invoice_currency,p_exchange_rate:p.exchange_rate,
-     p_received_date:p.received_date,p_payer_identity_id:p.payer_identity_id,
+     p_received_date:p.received_date,...(p.payer_identity_id==null?{p_payer_name:p.payer_name}:{p_payer_identity_id:p.payer_identity_id}),
      p_bank_name:p.bank_name||null
     });
     if(!result?.success)throw Error("Protected Bank Register did not confirm "+p.transaction_id);
