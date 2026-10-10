@@ -297,7 +297,7 @@ function render(){
  el("checked").textContent=reviewed()+"/"+items.length+" reviewed";
  el("bar").style.width=Math.round(reviewed()/items.length*100)+"%";
  el("sender").textContent=i.sender_name||"Unknown payer";
- el("customerMatch").textContent=describeCustomerMatch(i,payload,suggested);
+ el("customerMatch").textContent=i.sender_is_staff?"👔 COMPANY STAFF — this sender is a company staff member, not automatically the customer. Choose the actual customer without linking the staff name to their payer directory.":describeCustomerMatch(i,payload,suggested);
  el("original").textContent="Bank amount: "+money(i.amount)+" "+(i.currency||"")+"\nTransaction ID: "+(i.transaction_id||"Not supplied")+"\nSource message: "+i.source_message_id;
  choice=""; // Prevent previous transaction choices from triggering a payer popup on the next one.
  el("customerSearch").value="";hideCustomerSuggestions();pickCustomerOptions();
