@@ -469,7 +469,14 @@ el("bankForm").onsubmit=async(e)=>{
  finally{lock(false)}
 };
 el("detailsForm").onsubmit=async(e)=>{e.preventDefault();await next(index===items.length-1?"summary":1)};
-el("previous").onclick=async()=>{if(index===0||busy)return;await next(-1)};
+el("previous").onclick=()=>{
+ if(index===0||busy)return;
+ // Backward navigation is read-only. Save & Next is the explicit save action.
+ // A partially filled current transaction must not trap the reviewer.
+ index--;
+ render();
+ el("counter").scrollIntoView({behavior:"smooth",block:"start"});
+};
 el("jumpSummary").onclick=summary;
 el("back").onclick=()=>render();
 async function cancelPendingReview(){
