@@ -37,8 +37,8 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 @media(max-width:550px){.grid{grid-template-columns:1fr}.wrap{padding:12px 10px 40px}.purpose button{font-size:12px}}
 </style></head><body><main class="wrap">
 <div class="top"><span class="tag">🏦 BIG BROTHER · PRIVATE REVIEW</span><span id="mode" class="small">Checking access</span></div>
-<h1>Bank Transaction Review</h1>
-<p>Review existing bank notices. Register only transfers for a <strong>NEW Invoice Generator invoice</strong>; leave A/R and all other payments alone. Nothing is registered until final approval.</p>
+<h1>Customer Bank Balance Review</h1>
+<p>Review forwarded bank transfers and assign each verified payment to its actual customer. This registers a customer bank balance, not a payment against an invoice. Nothing is registered until final approval.</p>
 <div id="alert" class="notice hide" role="status" aria-live="polite"></div>
 <section id="loading">Connecting your personal Telegram session…</section>
 <section id="login" class="hide">
@@ -50,12 +50,12 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <div class="row"><strong id="counter">Transaction 1 of 1</strong><span id="checked" class="small">0 checked</span></div>
 <div class="progress"><div id="bar"></div></div>
 <h2 id="sender">Payer</h2><div id="customerMatch" class="small" style="font-size:14px;margin:-3px 0 12px;line-height:1.5" aria-live="polite"></div><div id="original" class="notice"></div>
-<h3>Choose this transfer's purpose</h3>
+<h3>Register this verified transfer for the selected customer</h3>
 <div class="purpose">
-<button type="button" id="chooseNew">✅ New Invoice — Register</button>
-<button type="button" id="chooseIgnore">⏭ Leave Alone — A/R / Other</button>
+<button type="button" id="chooseNew">✅ Register Customer Balance</button>
+<button type="button" id="chooseIgnore">⏭ Do Not Register</button>
 </div>
-<p class="small" id="purposeHint">Choose whether to register this for a new Invoice Generator sale.</p>
+<p class="small" id="purposeHint">Register the customer bank balance or skip an unrelated transfer.</p>
 <form id="detailsForm" novalidate>
 <div id="newDetails" class="hide">
  <label for="customerSearch">Customer search</label><input id="customerSearch" type="search" placeholder="Search customer name, ID, or location…" autocomplete="off" aria-controls="customerSuggestions" aria-label="Search customers by name or ID"><div id="customerSuggestions" class="customer-suggestions hide" aria-live="polite"></div>
@@ -70,7 +70,7 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
   <div><label for="received">Received Date</label><input id="received" type="text" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" autocomplete="off"></div>
   <div><label for="amount">Actual Bank Amount</label><input id="amount" type="number" step=".0001" min=".0001"></div>
   <div><label for="currency">Bank Currency</label><select id="currency"><option>USD</option><option>KHR</option></select></div>
-  <div><label for="invoiceCurrency">New Invoice Currency</label><select id="invoiceCurrency"><option>USD</option><option>KHR</option></select></div>
+  <div><label for="invoiceCurrency">Balance Usage Currency</label><select id="invoiceCurrency"><option>USD</option><option>KHR</option></select></div>
   <div id="rateArea" class="hide"><label for="rate">KHR per USD rate</label><input id="rate" type="number" step="any" min="1" disabled></div>
  </div><label for="bankName">Receiving Bank (optional)</label><input id="bankName">
  <p class="small">Registration only creates AVAILABLE Bank Register entries. Invoice Generator will consume them separately.</p>
@@ -88,8 +88,8 @@ dialog::backdrop{background:#000b}.inside{padding:17px}
 <div class="row"><h2>Final review summary</h2><strong id="summaryCount"></strong></div>
 <div id="summaryItems"></div>
 <div id="total" class="notice" style="margin-top:14px"></div>
-<p>Only <strong>New Invoice</strong> selections will be registered. Leaving a transfer alone does not change A/R, payment history, deposits, or the bank ledger.</p>
-<button class="wide" id="approve" type="button">Confirm &amp; Register New Invoice Payments</button>
+<p>Only confirmed customer bank balances will be registered. This does not automatically pay a new invoice or clear A/R.</p>
+<button class="wide" id="approve" type="button">Confirm &amp; Register Customer Balances</button>
 <button class="secondary wide" id="back" type="button">← Back to transactions</button>
 <button class="danger wide" id="cancelSummary" type="button">✖ Cancel Review — Discard This Batch</button>
 </section>
@@ -227,7 +227,7 @@ function describeCustomerMatch(invoice,payload,suggested){
  const mapped=suggested.map(id=>customers.find(c=>c.customer_id===id)).filter(Boolean);
  if(mapped.length===1)return "👤 Customer: "+clean(mapped[0].customer_name||mapped[0].customer_id)+" ("+mapped[0].customer_id+") · "+customerLocationText(mapped[0])+" · Bank Directory match";
  if(mapped.length>1)return "⚠️ Possible customers: "+mapped.map(c=>clean(c.customer_name||c.customer_id)+" ("+c.customer_id+") · "+customerLocationText(c)).join(" · ")+" — confirm customer before registering";
- return "⚠️ Customer: Not found in Customer Bank Directory — select a customer if this is a New Invoice";
+ return "⚠️ Customer: Not found in Customer Bank Directory — choose the correct customer";
 }
 function updatePayerRegistration(){
  const skip=el("skipPayer").checked;
@@ -278,8 +278,8 @@ function setChoice(value){choice=value;
  el("chooseNew").classList.toggle("active",choice==="new_invoice");
  el("chooseIgnore").classList.toggle("active",choice==="ignore");
  el("purposeHint").textContent=choice==="ignore"?"This transfer will not be registered or applied to any invoice.":
-  choice==="new_invoice"?"Confirm customer, payer, bank transaction and currency before saving.":
-  "Select New Invoice or Leave Alone to continue.";
+  choice==="new_invoice"?"Confirm the customer, transaction and amount before saving.":
+  "Choose Register Customer Balance or Do Not Register.";
 }
 function setRate(){
  const different=el("currency").value!==el("invoiceCurrency").value;
@@ -340,7 +340,7 @@ function details(){
 }
 async function save(){
  if(batch.status!=="reviewing")throw Error("Review already approved. Return to summary to finish safely.");
- if(!choice)throw Error("Choose New Invoice or Leave Alone before saving.");
+ if(!choice)throw Error("Choose Register Customer Balance or Do Not Register before saving.");
  const payload=choice==="new_invoice"?details():null,i=current();
  await call("save",{draft_id:i.draft_id,decision:choice,details:payload});
  Object.assign(i,{review_decision:choice,review_payload:payload});
@@ -396,8 +396,8 @@ function summary(){
   const customer=customers.find(x=>x.customer_id===item.review_payload?.customer_id);
   const bold=document.createElement("strong");bold.textContent=(pos+1)+". "+(item.sender_name||"Unknown sender");
   const small=document.createElement("div");small.className="small";
-  small.textContent=item.review_decision==="ignore"?"⏭ LEAVE ALONE":
-    item.review_decision==="new_invoice"?"✅ NEW INVOICE · "+clean(customer?.customer_name)+" · "+money(item.review_payload?.amount)+" "+item.review_payload?.currency+
+  small.textContent=item.review_decision==="ignore"?"⏭ NOT REGISTERED":
+    item.review_decision==="new_invoice"?"✅ CUSTOMER BALANCE · "+clean(customer?.customer_name)+" · "+money(item.review_payload?.amount)+" "+item.review_payload?.currency+
      (item.status==="registered"?" · Registered":""):
     "⚠️ Not reviewed";
   label.append(bold,small);
@@ -406,12 +406,12 @@ function summary(){
   edit.onclick=()=>{index=pos;render()};
   row.append(label,edit);el("summaryItems").append(row);
  }
- el("total").textContent="Review total: "+items.length+"\nNew Invoice Bank Register: "+selected.length+
-  "\nLeave Alone (A/R and other): "+ignores.length;
+ el("total").textContent="Review total: "+items.length+"\nCustomer Balances to Register: "+selected.length+
+  "\nNot Registered: "+ignores.length;
  el("cancelSummary").disabled=busy||batch.status!=="reviewing";
  el("approve").disabled=busy||saved!==items.length||
    !["reviewing","processing"].includes(batch.status);
- el("approve").textContent=batch.status==="processing"?"Resume Final Registration":"Confirm & Register "+selected.length+" New Invoice Payments";
+ el("approve").textContent=batch.status==="processing"?"Resume Final Registration":"Confirm & Register "+selected.length+" Customer Balances";
 }
 function openPayer(){
  if(!el("customer").value){say("Select the customer first.",true);return}
@@ -509,15 +509,15 @@ el("cancelSummary").onclick=cancelPendingReview;
 el("approve").onclick=async()=>{
  if(busy||reviewed()!==items.length)return;
  const n=items.filter(x=>x.review_decision==="new_invoice").length;
- if(batch.status==="reviewing"&&!confirm("CONFIRM FINAL BANK REVIEW?\n\nNew Invoice Bank Register: "+n+
- "\nLeave Alone: "+(items.length-n)+
- "\n\nOnly these New Invoice transfers will be registered. No A/R collections or invoices are marked paid."))return;
+ if(batch.status==="reviewing"&&!confirm("CONFIRM FINAL BANK REVIEW?\n\nCustomer Balances to Register: "+n+
+ "\nNot Registered: "+(items.length-n)+
+ "\n\nOnly the selected customer balances will be registered. No A/R collections or invoices are marked paid."))return;
  lock(true);let errorText="";
  try{
   if(batch.status==="reviewing"){await call("approve");batch.status="processing";}
   for(const item of items){
    if(item.review_decision!=="new_invoice"||item.status==="registered")continue;
-   say("Registering "+clean(item.review_payload?.transaction_id)+" for NEW INVOICE…");
+   say("Registering "+clean(item.review_payload?.transaction_id)+" for CUSTOMER BALANCE…");
    const p=item.review_payload;
    // If an earlier call succeeded but its acknowledgement failed, reconcile
    // the exact existing registration first instead of attempting a duplicate write.
@@ -538,8 +538,8 @@ el("approve").onclick=async()=>{
   const finished=await call("finish");
   batch.status="completed";section("complete");clear();
   el("completeText").textContent="Reviewed "+finished.total+" bank transactions. "+
-   finished.registered+" registered for NEW Invoice Generator invoices, "+
-   finished.ignored+" left alone. Each registration remains AVAILABLE; no A/R collection or invoice payment was created.";
+   finished.registered+" registered as customer bank balances, "+
+   finished.ignored+" not registered. Each registration remains AVAILABLE; no A/R collection or invoice payment was created.";
  }catch(err){errorText=err.message}
  finally{lock(false);if(!el("complete").classList.contains("hide"))return;
   summary();if(errorText)say("⚠️ "+errorText+"\nSuccessful registrations remain saved. Reopen or Resume Final Registration; do not register them manually again.",true)}
