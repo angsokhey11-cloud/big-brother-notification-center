@@ -39,11 +39,20 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
 .range-line strong{color:#91d2ff}
 .range-line small{display:block;color:#b1c6df;line-height:1.55}
 .note{font-size:12px;color:#9ab7d5;line-height:1.55;margin:6px 0 14px}
+.editbar{display:flex;gap:8px;flex-wrap:wrap;margin:9px 0}
+.editbar button,.edittools button{flex:1;min-width:104px;min-height:42px;padding:9px;font-size:13px}
+.editpanel{background:#08182c;border:1px solid #426182;padding:12px;border-radius:12px;margin:10px 0}
+.editpanel canvas{width:100%;height:auto;display:block;background:white;border-radius:5px;touch-action:none;cursor:crosshair}
+.edittools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.angleline{display:flex;gap:10px;align-items:center;margin-top:10px}
+.angleline input{flex:1;min-height:30px;padding:0;accent-color:#53b7ff}
+.angleline output{min-width:49px;text-align:right;font-variant-numeric:tabular-nums}
+.editnote{font-size:12px;color:#adc9e6;line-height:1.5;margin:9px 0 0}
 </style></head>
 <body><main class="wrap">
 <div class="top"><span class="logo">📸 BIG BROTHER · INVOICE REVIEW</span><span class="pill" id="mode">Loading…</span></div>
 <h1>Review invoice pictures</h1>
-<p style="margin-top:0">One original invoice photo at a time. Enter its date and number, then tap <strong>Save &amp; Next</strong>. After checking all photos, approve delivery to your mapped group and private chat.</p>
+<p style="margin-top:0">Review each invoice, crop or rotate when needed, then enter its date and number and tap <strong>Save &amp; Next</strong>. Approved albums use saved edited pictures wherever available.</p>
 <div id="alert" class="msg hide" role="status" aria-live="polite"></div>
 <div id="loading" class="card">Checking your private Telegram review task…</div>
 <div id="empty" class="card hide">
@@ -56,7 +65,15 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
   <div class="row"><strong id="counter">Picture 1 of 1</strong><span id="reviewCount" class="pill">0 confirmed</span></div>
   <div class="progress"><div class="fill" id="bar" style="width:0%"></div></div>
   <div class="preview"><div class="placeholder" id="photoPlaceholder">📷<br>Loading the original invoice picture…</div><img class="hide" id="photo" alt="Original invoice photo to review"/></div>
-  <p id="photoHint" class="subtle" style="margin:0;font-size:12px">Original picture only. The two fields below control sorting; they do not rewrite the invoice.</p>
+  <div class="editbar" id="editBar"><button type="button" class="secondary" id="openEdit">✂ Crop / Rotate</button><button type="button" class="secondary" id="restoreOriginal">↩ Restore Original</button></div>
+  <section class="editpanel hide" id="editor" aria-label="Invoice picture editor">
+   <p class="editnote">Drag a rectangle on the picture to crop. Use the slider for angles from −180° to +180°. Edits are saved when you tap Save &amp; Next.</p>
+   <canvas id="editCanvas" aria-label="Drag to select crop area"></canvas>
+   <div class="edittools"><button type="button" class="secondary" id="leftRotate">↺ −90°</button><button type="button" class="secondary" id="rightRotate">↻ +90°</button></div>
+   <div class="angleline"><input type="range" min="-180" max="180" step="1" value="0" id="angle" aria-label="Rotation in degrees"><output id="angleText" for="angle">0°</output></div>
+   <div class="edittools"><button type="button" class="secondary" id="applyCrop" disabled>✂ Apply Crop</button><button type="button" class="secondary" id="cancelEdit">Cancel</button><button type="button" class="primary" id="useEdit">Use Edited Picture</button></div>
+  </section>
+  <p id="photoHint" class="subtle" style="margin:0;font-size:12px">Unedited Telegram picture.</p>
   <form id="form">
    <label for="date">Invoice Date</label>
    <input type="date" id="date" required>
@@ -76,11 +93,11 @@ kbd{background:#274361;border-radius:5px;padding:2px 5px;color:#e8f5ff}
  <div id="rangeSummary"></div>
  <h3 style="margin:18px 0 8px">🧾 Individual invoices</h3>
  <div id="summaryList"></div>
- <p id="deliveryNotice" class="subtle">After confirming all pictures, the bot will send your sorted original photos to your mapped group/topic and private chat.</p>
+ <p id="deliveryNotice" class="subtle">After confirming all pictures, the bot will send saved edited photos where available and originals for the rest.</p>
  <button class="primary wide" id="approve" disabled>Approve &amp; Send</button>
  <button class="secondary wide" id="backToReview">← Back to pictures</button>
 </section>
-<p class="footer">Private reviewer only · No OCR auto-approval · Temporary image references · No modification of original invoice details</p>
+<p class="footer">Private reviewer only · No OCR auto-approval · Original Telegram files retained · Temporary edited copies deleted after delivery</p>
 </main>
 <script>
 (()=>{
@@ -89,13 +106,24 @@ const tg=window.Telegram?.WebApp,initData=tg?.initData||"";
 const api="https://sjfhlaclgmkwwofzstok.supabase.co/functions/v1/bb-invoice-photo-review";
 const el=id=>document.getElementById(id);
 let items=[],batch=null,index=0,preview=false,blobUrl=null,busy=false,rememberedDate="";
+let pendingImage=null,resetOriginal=false,sourceCanvas=null,rotatedCanvas=null,editAngle=0,cropStart=null,cropEnd=null,cropping=false;
 tg?.ready?.();tg?.expand?.();
 const safe=(x)=>String(x??"");
 const status=(message,error=false)=>{el("alert").textContent=message;el("alert").className="msg"+(error?" error":"");el("alert").classList.remove("hide")};
 const clearStatus=()=>el("alert").classList.add("hide");
 function section(name){for(const id of ["loading","empty","review","summary"])el(id).classList.toggle("hide",id!==name)}
-async function call(action,args={},image=false){
- const res=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,init_data:initData,...args})});
+async function call(action,args={},image=false,upload=null){
+ let options={method:"POST"};
+ if(upload){
+  const form=new FormData();
+  for(const [key,value] of Object.entries({action,init_data:initData,...args}))form.append(key,String(value));
+  form.append("edited_image",upload,"edited-invoice.jpg");
+  options.body=form;
+ }else{
+  options.headers={"content-type":"application/json"};
+  options.body=JSON.stringify({action,init_data:initData,...args});
+ }
+ const res=await fetch(api,options);
  if(!res.ok){let msg;try{msg=(await res.json()).error}catch{}throw Error(msg||"Request failed. Please reopen the review from Telegram.");}
  if(image)return await res.blob();
  const data=await res.json();if(!data.ok)throw Error(data.error||"Request failed");return data;
@@ -103,10 +131,143 @@ async function call(action,args={},image=false){
 function completed(){return items.filter(x=>x.review_state==="confirmed"&&x.invoice_no&&x.invoice_date).length}
 function setPhoto(src){if(blobUrl){URL.revokeObjectURL(blobUrl);blobUrl=null}if(src){blobUrl=src;el("photo").src=src;el("photo").classList.remove("hide");el("photoPlaceholder").classList.add("hide")}else{el("photo").classList.add("hide");el("photoPlaceholder").classList.remove("hide")}}
 let renderToken=0;
+function closeEditor(){
+ el("editor").classList.add("hide");el("photo").classList.remove("hide");
+ sourceCanvas=null;rotatedCanvas=null;cropStart=null;cropEnd=null;cropping=false;
+}
+function canvasFromImage(img){
+ const scale=Math.min(1,2400/Math.max(img.naturalWidth,img.naturalHeight));
+ const canvas=document.createElement("canvas");
+ canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+ canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+ const ctx=canvas.getContext("2d");
+ ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ return canvas;
+}
+function rotatedImage(){
+ const radians=editAngle*Math.PI/180,cos=Math.abs(Math.cos(radians)),sin=Math.abs(Math.sin(radians));
+ const canvas=document.createElement("canvas");
+ canvas.width=Math.ceil(sourceCanvas.width*cos+sourceCanvas.height*sin);
+ canvas.height=Math.ceil(sourceCanvas.width*sin+sourceCanvas.height*cos);
+ const ctx=canvas.getContext("2d");
+ ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.translate(canvas.width/2,canvas.height/2);
+ ctx.rotate(radians);
+ ctx.drawImage(sourceCanvas,-sourceCanvas.width/2,-sourceCanvas.height/2);
+ return canvas;
+}
+function drawEditor(recalculate=false){
+ if(!sourceCanvas)return;
+ if(recalculate||!rotatedCanvas)rotatedCanvas=rotatedImage();
+ const canvas=el("editCanvas"),factor=Math.min(1,1100/Math.max(rotatedCanvas.width,rotatedCanvas.height));
+ const w=Math.max(1,Math.round(rotatedCanvas.width*factor)),h=Math.max(1,Math.round(rotatedCanvas.height*factor));
+ if(canvas.width!==w)canvas.width=w;
+ if(canvas.height!==h)canvas.height=h;
+ const ctx=canvas.getContext("2d");ctx.clearRect(0,0,w,h);
+ ctx.drawImage(rotatedCanvas,0,0,w,h);
+ if(cropStart&&cropEnd){
+  const x=Math.min(cropStart.x,cropEnd.x),y=Math.min(cropStart.y,cropEnd.y);
+  const cw=Math.abs(cropEnd.x-cropStart.x),ch=Math.abs(cropEnd.y-cropStart.y);
+  ctx.fillStyle="rgba(2,13,28,.3)";ctx.fillRect(0,0,w,h);
+  ctx.clearRect(x,y,cw,ch);
+  ctx.drawImage(rotatedCanvas,x*rotatedCanvas.width/w,y*rotatedCanvas.height/h,
+    cw*rotatedCanvas.width/w,ch*rotatedCanvas.height/h,x,y,cw,ch);
+  ctx.strokeStyle="#54baff";ctx.lineWidth=3;ctx.strokeRect(x,y,cw,ch);
+  el("applyCrop").disabled=cw<15||ch<15;
+ }else el("applyCrop").disabled=true;
+ el("angle").value=String(editAngle);
+ el("angleText").textContent=editAngle+"°";
+}
+function pointerPos(e){
+ const canvas=el("editCanvas"),rect=canvas.getBoundingClientRect();
+ return {x:Math.max(0,Math.min(canvas.width,(e.clientX-rect.left)*canvas.width/rect.width)),
+         y:Math.max(0,Math.min(canvas.height,(e.clientY-rect.top)*canvas.height/rect.height))};
+}
+el("editCanvas").addEventListener("pointerdown",e=>{
+ if(!sourceCanvas)return;
+ e.preventDefault();
+ cropStart=pointerPos(e);cropEnd={...cropStart};cropping=true;
+ el("editCanvas").setPointerCapture(e.pointerId);drawEditor();
+});
+el("editCanvas").addEventListener("pointermove",e=>{
+ if(!cropping)return;cropEnd=pointerPos(e);drawEditor();
+});
+function finishCrop(e){
+ if(!cropping)return;
+ cropEnd=pointerPos(e);cropping=false;drawEditor();
+}
+el("editCanvas").addEventListener("pointerup",finishCrop);
+el("editCanvas").addEventListener("pointercancel",()=>{cropping=false;cropStart=null;cropEnd=null;drawEditor()});
+el("applyCrop").onclick=()=>{
+ if(!rotatedCanvas||!cropStart||!cropEnd)return;
+ const canvas=el("editCanvas"),sx=rotatedCanvas.width/canvas.width,sy=rotatedCanvas.height/canvas.height;
+ const x=Math.max(0,Math.floor(Math.min(cropStart.x,cropEnd.x)*sx));
+ const y=Math.max(0,Math.floor(Math.min(cropStart.y,cropEnd.y)*sy));
+ const w=Math.min(rotatedCanvas.width-x,Math.ceil(Math.abs(cropStart.x-cropEnd.x)*sx));
+ const h=Math.min(rotatedCanvas.height-y,Math.ceil(Math.abs(cropStart.y-cropEnd.y)*sy));
+ if(w<20||h<20)return;
+ const cropped=document.createElement("canvas");cropped.width=w;cropped.height=h;
+ cropped.getContext("2d").drawImage(rotatedCanvas,x,y,w,h,0,0,w,h);
+ sourceCanvas=cropped;editAngle=0;cropStart=null;cropEnd=null;drawEditor(true);
+};
+function setAngle(degrees){
+ editAngle=Math.max(-180,Math.min(180,degrees));
+ cropStart=null;cropEnd=null;drawEditor(true);
+}
+el("angle").oninput=()=>setAngle(Number(el("angle").value));
+el("leftRotate").onclick=()=>setAngle(((editAngle-90+180+720)%360)-180);
+el("rightRotate").onclick=()=>setAngle(((editAngle+90+180+720)%360)-180);
+el("openEdit").onclick=async()=>{
+ if(busy||!items.length||preview||!batch||batch.status!=="awaiting_review"||el("photo").classList.contains("hide"))return;
+ try{
+  const img=new Image();
+  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=el("photo").src;});
+  sourceCanvas=canvasFromImage(img);editAngle=0;cropStart=null;cropEnd=null;
+  el("editor").classList.remove("hide");el("photo").classList.add("hide");drawEditor(true);
+ }catch(e){status("Unable to open image editor",true)}
+};
+el("cancelEdit").onclick=()=>closeEditor();
+el("useEdit").onclick=async()=>{
+ if(!sourceCanvas||busy)return;
+ try{
+  let output=rotatedImage();
+  const scale=Math.min(1,2600/Math.max(output.width,output.height));
+  if(scale<1){
+   const shrunk=document.createElement("canvas");
+   shrunk.width=Math.max(1,Math.round(output.width*scale));
+   shrunk.height=Math.max(1,Math.round(output.height*scale));
+   shrunk.getContext("2d").drawImage(output,0,0,shrunk.width,shrunk.height);
+   output=shrunk;
+  }
+  let quality=.88,blob;
+  do{
+   blob=await new Promise(resolve=>output.toBlob(resolve,"image/jpeg",quality));
+   if(!blob)throw Error("Unable to export edited image");
+   quality-=.12;
+  }while(blob.size>4_500_000&&quality>=.45);
+  if(blob.size>5_000_000)throw Error("Edited image is too large. Please crop it closer.");
+  pendingImage=blob;resetOriginal=false;
+  closeEditor();setPhoto(URL.createObjectURL(blob));
+  el("photoHint").textContent="Edited picture ready. Tap Save & Next to store it for final Telegram delivery.";
+ }catch(e){status(e.message,true)}
+};
+el("restoreOriginal").onclick=async()=>{
+ if(busy||preview||!batch||batch.status!=="awaiting_review")return;
+ busy=true;
+ try{
+  const file=await call("photo",{batch_id:batch.batch_id,queue_id:items[index].queue_id,original:true},true);
+  closeEditor();pendingImage=null;resetOriginal=true;setPhoto(URL.createObjectURL(file));
+  el("photoHint").textContent="Original picture restored for this review. Tap Save & Next to remove the previous saved edit.";
+ }catch(e){status(e.message,true)}
+ finally{busy=false}
+};
 async function render(){
  if(!items.length){section("empty");return}
  section("review");clearStatus();
+ closeEditor();pendingImage=null;resetOriginal=false;
  const i=items[index];if(!i)return;
+ el("editBar").classList.toggle("hide",preview||batch?.status!=="awaiting_review");
  el("counter").textContent="Picture "+(index+1)+" of "+items.length;
  el("reviewCount").textContent=completed()+" confirmed";
  el("bar").style.width=Math.round(completed()/items.length*100)+"%";
@@ -117,7 +278,7 @@ async function render(){
  el("prev").disabled=busy||index===0;
  el("next").textContent=index===items.length-1?"Save & Review Summary →":"Save & Next →";
  el("next").disabled=busy||(!preview&&batch?.status!=="awaiting_review");
- el("photoHint").textContent=preview?"DEMO ONLY — this is a placeholder, not a real invoice picture.":"Original Telegram photo. The fields only control sorting; they do not change writing on the original.";
+ el("photoHint").textContent=preview?"DEMO ONLY — picture editing is disabled.":i.has_edit?"Saved edited version. You may edit again or restore the original.":"Original Telegram photo. Crop or rotate only if needed.";
  setPhoto(null);
  el("photoPlaceholder").textContent=preview?"📸\nOriginal invoice picture appears here when a real task is ready.":"Loading original invoice picture…";
  const t=++renderToken;
@@ -134,8 +295,10 @@ async function saveCurrent(){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||Number.isNaN(Date.parse(d)))throw Error("Select a valid invoice date.");
  const item=items[index];
  if(!preview){
-  const r=await call("save",{batch_id:batch.batch_id,queue_id:item.queue_id,invoice_no:n,invoice_date:d});
+  if(!el("editor").classList.contains("hide"))throw Error("Tap Use Edited Picture or Cancel before saving.");
+  const r=await call("save",{batch_id:batch.batch_id,queue_id:item.queue_id,invoice_no:n,invoice_date:d,...(resetOriginal?{reset_original:true}:{})},false,pendingImage);
   Object.assign(item,r.item);
+  pendingImage=null;resetOriginal=false;
  }else Object.assign(item,{invoice_no:n,invoice_date:d,review_state:"confirmed"});
  // Apply only to future, still-unreviewed pictures; never overwrite confirmed dates.
  rememberedDate=d;
@@ -240,7 +403,9 @@ function showSummary(){
   const row=document.createElement("div");row.className="summaryrow";
   const info=document.createElement("div");const strong=document.createElement("strong");
   strong.textContent=i.invoice_no||"Not reviewed";const small=document.createElement("span");small.textContent=i.invoice_date||"Date missing";
-  info.append(strong,small);const edit=document.createElement("button");edit.type="button";edit.textContent="Edit";
+  info.append(strong,small);
+  if(i.has_edit){const edited=document.createElement("span");edited.textContent="✂ Edited picture";info.append(edited);}
+  const edit=document.createElement("button");edit.type="button";edit.textContent="Edit";
   edit.onclick=()=>{index=items.findIndex(x=>x===i);render()};
   row.append(info,edit);el("summaryList").append(row);
  }
@@ -255,7 +420,7 @@ function showSummary(){
   ?"UI preview only. Nothing is stored or sent."
   :isCollecting?"Still collecting forwarded photos. Wait a moment or send /done privately to the bot."
   :isFailed?"Some albums did not reach their destinations. Already delivered albums are tracked separately. If the bot reports an uncertain send, contact admin before retrying."
-  :ready?"After approval, the bot sends the original, unaltered invoice photos sorted by your confirmed date and number. Printed invoice details remain intact."
+  :ready?"After approval, the bot sends SAVED edited pictures when available and originals for untouched invoices, sorted by date and number. Originals remain untouched."
   :"Complete the date and number for EVERY picture before approving.";
 }
 // Sticky date applies when the reviewer changes the field, including using a date picker.
@@ -276,7 +441,13 @@ for(const field of [el("date"),el("number")]){
 }
 el("form").onsubmit=async(e)=>{e.preventDefault();await move(index===items.length-1?"summary":1)};
 el("prev").onclick=async()=>{if(busy||index===0)return;const n=el("number").value.trim(),d=el("date").value;if(n&&d){await move(-1)}else{index--;await render()}};
-el("summaryButton").onclick=()=>showSummary();el("backToReview").onclick=()=>render();
+el("summaryButton").onclick=()=>{
+ if(!el("editor").classList.contains("hide")||pendingImage||resetOriginal){
+  status("Tap Save & Next to save your picture changes before reviewing the summary.",true);return;
+ }
+ showSummary();
+};
+el("backToReview").onclick=()=>render();
 el("approve").onclick=async()=>{
  if(busy||preview||!batch||completed()!==items.length||!items.length)return;
  const retry=batch.status==="failed";
