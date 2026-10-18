@@ -242,9 +242,24 @@ async function route(update:any){
  if(action.startsWith("v3:e:")){const id=Number(action.slice(5)),s=await session(user);const all=await available(a);if(!all.some((e:any)=>Number(e.earning_id)===id)){await earningMenu(chat,a,s?.page||0,editId);return true;}const chosen=new Set<number>((s?.selected_earning_ids||[]).map(Number));if(chosen.has(id))chosen.delete(id);else chosen.add(id);await save(user,{selected_earning_ids:[...chosen]});await earningMenu(chat,a,s?.page||0,editId);return true;}
  if(action==="v3:finish"){await earningFinish(chat,a,editId);return true;}
  if(action==="v3:submit"){
-  // Do not create a second payment workflow. Financial submission requires the
-  // separate, privileged Staff Relation bridge, installed only after verification.
-  await show(chat,await session(user),phrase(a,"🔒 ការស្នើសុំតាម Telegram កំពុងរង់ចាំការភ្ជាប់សុវត្ថិភាពទៅ Staff Relation។ អ្នកអាចស្នើសុំតាម Staff Relation បានឥឡូវនេះ។","🔒 Telegram payment submission awaits the secure Staff Relation identity bridge. You can submit from Staff Relation now."),kb(nav(a,"v3:earn")),editId);return true;
+  const s=await session(user);
+  if(s?.mode!=="earn_confirm"){await earningMenu(chat,a,0,editId);return true;}
+  const selection=(s.selected_earning_ids||[]).map(Number);
+  const all=await available(a);
+  const chosen=all.filter((e:any)=>selection.includes(Number(e.earning_id)));
+  if(!chosen.length||chosen.length!==new Set(selection).size){
+   await show(chat,s,phrase(a,"⚠️ ប្រាក់ចំណូលដែលបានជ្រើសរើសមានការផ្លាស់ប្ដូរ។ សូមពិនិត្យម្ដងទៀត។","⚠️ Your selected earnings have changed. Please review them again."),kb([[[phrase(a,"🔄 ពិនិត្យម្ដងទៀត","🔄 Review Earnings"),"v3:earn"]],...nav(a)]),editId);
+   return true;
+  }
+  if(new Set(chosen.map((e:any)=>e.currency)).size!==1){await earningFinish(chat,a,editId);return true;}
+  const {data:result,error}=await db().rpc("bb_staff_assistant_request_via_staff_relation",{p_telegram_user_id:user,p_earning_ids:chosen.map((e:any)=>Number(e.earning_id))});
+  if(error||!result?.success){
+   await show(chat,s,phrase(a,"⚠️ មិនទាន់អាចផ្ញើសំណើបានទេ៖ ","⚠️ Could not submit request: ")+esc(error?.message||"Staff Relation rejected this request."),kb([[[phrase(a,"🔄 ពិនិត្យម្ដងទៀត","🔄 Review Earnings"),"v3:earn"]],...nav(a)]),editId);
+   return true;
+  }
+  await save(user,{mode:"menu",selected_earning_ids:[]});
+  await show(chat,await session(user),"✅ <b>"+phrase(a,"សំណើសុំបើកប្រាក់ត្រូវបានផ្ញើ","Earnings Request Submitted")+"</b>\n"+phrase(a,"លេខសំណើ","Request")+": "+esc(result.requestNo)+"\n"+phrase(a,"សរុប","Total")+": "+money(result.requestedAmount,result.currency)+"\n"+phrase(a,"ស្ថានភាព","Status")+": "+phrase(a,"រង់ចាំ Admin អនុម័ត","Pending Admin approval"),kb([[[phrase(a,"📨 ស្ថានភាពសំណើ","📨 Request Status"),"v3:requests"]],...nav(a)]),editId);
+  return true;
  }
  if(action==="v3:requests"||action==="v3:history"){await requests(chat,a,action==="v3:history",editId);return true;}
  if(!cb&&input&&!input.startsWith("/")){
