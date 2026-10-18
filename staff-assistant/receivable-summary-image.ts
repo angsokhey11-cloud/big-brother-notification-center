@@ -15,7 +15,7 @@ let fontCache:Promise<ArrayBuffer|null>|undefined;
 async function getFont(){
  if(!fontCache)fontCache=(async()=>{try{
   // Public static font asset; NO customer data in this font request.
-  const r=await fetch("https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskhmer/NotoSansKhmer%5Bwdth%2Cwght%5D.ttf",{signal:AbortSignal.timeout(9000)});
+  const r=await fetch("https://raw.githubusercontent.com/notofonts/noto-fonts/main/hinted/ttf/NotoSansKhmer/NotoSansKhmer-Regular.ttf",{signal:AbortSignal.timeout(9000)});
   if(r.ok)return await r.arrayBuffer();
  }catch(_){}return null;})();
  return fontCache;
