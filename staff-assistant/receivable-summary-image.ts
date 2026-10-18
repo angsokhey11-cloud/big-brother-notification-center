@@ -2,6 +2,7 @@
 // Generates Telegram-ready PNGs in memory. No DB storage, message archive, or external image-rendering API.
 import React from "npm:react@18.3.1";
 import { ImageResponse } from "npm:@vercel/og@0.6.2";
+import { render as shapeSvgText } from "jsr:@nick/resvg@0.1.0-rc.1";
 type Invoice={invoice_id:string;invoice_no:string;invoice_date:string;due_date?:string|null;grand_total:number;amount_paid:number;outstanding:number;currency:string};
 type Customer={customer_name:string;phone?:string|null;address?:string|null};
 const n=(x:unknown)=>Number(x||0);
@@ -27,6 +28,24 @@ export function outstandingTotals(rows:Invoice[]){
 }
 async function renderPage(c:Customer,location:string,rows:Invoice[],page:number,pages:number,count:number,total:string):Promise<Uint8Array>{
  const face=await getFont(),family=face?"Khmer":"sans-serif";
+ // NiDA is a Unicode keyboard layout, not an actual font family.
+ // Pre-shape Khmer via resvg's native Khmer-aware renderer; old ImageResponse keeps the A/R layout.
+ const khmer=/[\u1780-\u17FF]/;
+ const fontBytes=face?new Uint8Array(face):null;
+ function encodedPng(data:Uint8Array){
+  let result="";
+  for(let i=0;i<data.length;i+=8192)result+=String.fromCharCode(...data.subarray(i,i+8192));
+  return btoa(result);
+ }
+ function drawText(text:string,fontSize:number,color:string,width:number,height:number){
+  if(!khmer.test(text))return h("div",{style:{fontSize,color,overflow:"hidden",width}},text);
+  if(!fontBytes)throw Error("Khmer font not available for report rendering");
+  const safe=text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><text x="1" y="'+Math.round(fontSize*1.5)+'" font-family="Noto Sans Khmer" font-size="'+fontSize+'" font-weight="400" fill="'+color+'">'+safe+'</text></svg>';
+  const png=shapeSvgText(svg,{fontFaces:[{kind:"sans-serif",name:"Noto Sans Khmer",weight:400,style:"normal",data:fontBytes}],fontFamily:"Noto Sans Khmer"});
+  return h("img",{src:"data:image/png;base64,"+encodedPng(png),width,height,style:{width,height,objectFit:"contain",alignSelf:"flex-start"}});
+ }
+
  const widths=[37,110,130,130,160,145,170];
  const cell=(value:string,width:number,bold=false,end=false)=>flex({width,flexShrink:0,padding:"0 6px",justifyContent:end?"flex-end":"flex-start",alignItems:"center",overflow:"hidden",fontWeight:bold?700:400,fontSize:15,color:bold?col:"#324d65"},value);
  const th=["#","Invoice No","Date","Due Date","Grand Total","Paid","Outstanding"];
@@ -44,8 +63,8 @@ async function renderPage(c:Customer,location:string,rows:Invoice[],page:number,
    h("div",null,"Summary Date: "+new Date().toLocaleDateString("en-GB",{timeZone:"Asia/Phnom_Penh",day:"2-digit",month:"short",year:"numeric"}).replace(/ /g,"-")),
    h("div",null,"Open Invoices: "+count),h("div",null,"Page "+(page+1)+" / "+pages)));
  const custBox=(caption:string,main:string,other:string,size=22)=>flex({width:"50%",flexDirection:"column",padding:18,backgroundColor:"#eef5fc",borderRadius:8},
-  h("div",{style:{color:muted,fontSize:14}},caption),h("div",{style:{color:col,fontSize:size,fontWeight:700,marginTop:7}},main),
-  h("div",{style:{color:muted,fontSize:15,marginTop:7}},other));
+  h("div",{style:{color:muted,fontSize:14}},caption),h("div",{style:{display:"flex",alignItems:"flex-start",marginTop:7,minHeight:38}},drawText(main,size,col,406,42)),
+  h("div",{style:{display:"flex",alignItems:"flex-start",marginTop:7,minHeight:34}},drawText(other,15,muted,406,36)));
  const canvas=flex({flexDirection:"column",width:1000,height:1414,padding:"55px 48px",backgroundColor:"#ffffff",fontFamily:family,color:col},
   title,
   flex({width:"100%",justifyContent:"center",padding:"26px 0"},h("div",{style:{fontSize:26,fontWeight:800}},"CUSTOMER INVOICE SUMMARY")),
