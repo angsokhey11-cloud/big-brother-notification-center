@@ -3,6 +3,7 @@
 // Only admin-approved staff mapping + language, and 30-minute expiring navigation IDs.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { renderReceivableSummary, deliverPhotos } from "./receivable-summary-image.ts";
 const env=(x:string)=>Deno.env.get(x)||"";
 const db=()=>createClient(env("SUPABASE_URL"),env("SUPABASE_SERVICE_ROLE_KEY"),{auth:{persistSession:false}});
 const val=(x:unknown)=>String(x??"").trim();
@@ -102,14 +103,14 @@ async function customerHome(chat:string,a:any,id:string,mode:string,editId?:numb
  ...nav(a,"v3:customer")
  ]),editId);
 }
-async function customerInvoices(id:string){const {data,error}=await db().from("invoices").select("invoice_id,invoice_no,invoice_date,customer_id,currency,grand_total,outstanding,amount_paid,status").eq("customer_id",id).order("invoice_date",{ascending:false}).limit(1000);if(error)throw error;return data||[];}
+async function customerInvoices(id:string){const {data,error}=await db().from("invoices").select("invoice_id,invoice_no,invoice_date,customer_id,currency,grand_total,outstanding,amount_paid,status,due_date").eq("customer_id",id).order("invoice_date",{ascending:false}).limit(1000);if(error)throw error;return data||[];}
 async function outstanding(chat:string,a:any,c:any,editId?:number){
  const items=(await customerInvoices(c.customer_id)).filter((i:any)=>num(i.outstanding)>0.000001).sort((x:any,y:any)=>val(x.invoice_date).localeCompare(val(y.invoice_date)));
  const loc=await locationMap();const byCur:any={};for(const i of items){const cur=val(i.currency)||"USD";byCur[cur]=(byCur[cur]||0)+num(i.outstanding);}
  let text="📋 <b>"+phrase(a,"របាយការណ៍បំណុលអតិថិជន","Customer Outstanding Summary")+"</b>\n👤 "+esc(c.customer_name)+"\n📍 "+esc(loc[c.location_code]||c.location_code)+"\n🧾 "+phrase(a,"វិក្កយបត្រនៅជំពាក់","Open invoices")+": "+items.length+"\n";
  text+=Object.entries(byCur).map(([cur,total])=>money(total,cur)).join(" / "); 
  text+="\n"+(items.length?items.slice(0,35).map((i:any)=>esc(i.invoice_no)+" · "+fmtDate(i.invoice_date)+" · "+money(i.outstanding,i.currency)).join("\n"):phrase(a,"✅ មិនមានវិក្កយបត្រនៅជំពាក់។","✅ No outstanding invoices."));
- const rows=[[[phrase(a,"📸 រូបវិក្កយបត្រដើម","📸 Original Invoice Album"),"v3:album"]],[[phrase(a,"📊 ប្រវត្តិលក់","📊 Sales History"),"v3:salesopen"],[phrase(a,"📦 ការទិញចុងក្រោយ","📦 Last Purchase"),"v3:lastopen"]],...nav(a,"v3:customer")];
+ const rows=[[[phrase(a,"📋 បង្កើតរូបសង្ខេបបំណុល","📋 Create Receivable Summary"),"v3:report"]],[[phrase(a,"📸 សង្ខេប + រូបវិក្កយបត្រដើម","📸 Summary + Original Invoice Album"),"v3:album"]],[[phrase(a,"📊 ប្រវត្តិលក់","📊 Sales History"),"v3:salesopen"],[phrase(a,"📦 ការទិញចុងក្រោយ","📦 Last Purchase"),"v3:lastopen"]],...nav(a,"v3:customer")];
  await show(chat,await save(chat,{mode:"customer_open",customer_id:c.customer_id}),text,kb(rows),editId);
 }
 async function sales(chat:string,a:any,c:any,editId?:number){
@@ -147,21 +148,55 @@ async function invoiceOpen(chat:string,a:any,id:string,editId?:number,typedReply
  t+="\n\n"+phrase(a,"សរុប","Total")+": "+money(i.grand_total,i.currency)+"\n"+phrase(a,"បានបង់","Paid")+": "+money(i.amount_paid,i.currency)+"\n"+phrase(a,"នៅជំពាក់","Outstanding")+": "+money(i.outstanding,i.currency)+"\n"+phrase(a,"ស្ថានភាព","Status")+": "+esc(i.status);
  await show(chat,await save(chat,{mode:"invoice_open",invoice_id:id}),t,kb([[[phrase(a,"📷 រូបវិក្កយបត្រដើម","📷 Original Invoice Photo"),"v3:photo"]],...nav(a,"v3:invoice")]),editId,typedReply);
 }
+
+// Customer report is generated on demand; no Telegram summary images or transcripts are stored.
+async function buildReceivableSummary(chat:string,a:any){
+ const s=await session(chat);if(!s?.customer_id)throw Error("Choose a customer first");
+ const {data:c,error}=await db().from("customers").select("customer_name,location_code,phone,address").eq("customer_id",s.customer_id).maybeSingle();
+ if(error||!c)throw Error("Customer not found");
+ const loc=await locationMap();
+ const rows=(await customerInvoices(s.customer_id)).filter((i:any)=>num(i.outstanding)>0.000001).sort((x:any,y:any)=>val(x.invoice_date).localeCompare(val(y.invoice_date))||val(x.invoice_no).localeCompare(val(y.invoice_no)));
+ const rendered=await renderReceivableSummary(c,val(loc[c.location_code])||"—",rows);
+ return {rows,c,rendered};
+}
+async function createReceivableSummary(chat:string,a:any){
+ try{
+  const r=await buildReceivableSummary(chat,a);
+  await deliverPhotos(chat,env("TELEGRAM_BOT_TOKEN"),r.rendered.images.map((png:Uint8Array,i:number)=>({
+   png,caption:i===0?"📋 "+val(r.c.customer_name)+" · "+r.rows.length+" "+phrase(a,"វិក្កយបត្រនៅជំពាក់","open invoices")+" · "+r.rendered.total:undefined
+  })));
+ }catch(e){
+  console.warn("V3 receivable report failed",e instanceof Error?e.name:"error");
+  await tg("sendMessage",{chat_id:chat,text:phrase(a,"⚠️ មិនអាចបង្កើតរូបសង្ខេបបំណុលបានទេ។ សូមសាកល្បងម្ដងទៀត។","⚠️ Could not generate the receivable summary picture. Please try again.")});
+ }
+}
+
 async function sendPhotos(chat:string,a:any,invoiceIds:string[],summary?:{name:string, count:number,total:string}){
- if(!invoiceIds.length){await tg("sendMessage",{chat_id:chat,text:phrase(a,"មិនមានរូបវិក្កយបត្រដើមដែលត្រូវផ្ញើ។","No original invoice photos to send.")});return;}
- const {data:files,error}=await db().from("bb_real_invoice_files").select("invoice_id,storage_path,retention_deleted_at").in("invoice_id",invoiceIds);
+ if(!invoiceIds.length&&!summary){await tg("sendMessage",{chat_id:chat,text:phrase(a,"មិនមានរូបវិក្កយបត្រដើមដែលត្រូវផ្ញើ។","No original invoice photos to send.")});return;}
+ const {data:files,error}=invoiceIds.length?await db().from("bb_real_invoice_files").select("invoice_id,storage_path,mime_type,retention_deleted_at").in("invoice_id",invoiceIds):{data:[],error:null};
  if(error)throw error;
  const current=new Map((files||[]).filter((x:any)=>!x.retention_deleted_at).map((x:any)=>[x.invoice_id,x]));
  const ordered=invoiceIds.filter(id=>current.has(id));
  const missing=invoiceIds.filter(id=>!current.has(id));
  const payload:any[]=[];
  for(const id of ordered){
-  const f:any=current.get(id);const {data, error:signError}=await db().storage.from("bb-real-invoices").createSignedUrl(f.storage_path,180);
+  const f:any=current.get(id);if(val(f.mime_type)&&!val(f.mime_type).startsWith("image/")){missing.push(id);continue;}const {data, error:signError}=await db().storage.from("bb-real-invoices").createSignedUrl(f.storage_path,1200);
   if(!signError&&data?.signedUrl)payload.push({type:"photo",media:data.signedUrl});
   else missing.push(id);
  }
- if(summary)await tg("sendMessage",{chat_id:chat,text:"📋 "+summary.name+"\n🧾 "+summary.count+" · "+summary.total+"\n📸 "+payload.length+" "+phrase(a,"រូបដើម","original photos")});
- for(let j=0;j<payload.length;j+=10){const group=payload.slice(j,j+10);if(group.length===1)await tg("sendPhoto",{chat_id:chat,photo:group[0].media});else await tg("sendMediaGroup",{chat_id:chat,media:group});}
+ let summaryImages:any[]=[];
+ if(summary){
+  try{
+   const report=await buildReceivableSummary(chat,a);
+   summaryImages=report.rendered.images.map((png:Uint8Array,i:number)=>({png,caption:i===0?"📋 "+summary.name+" · "+report.rows.length+" "+phrase(a,"វិក្កយបត្រនៅជំពាក់","open invoices")+" · "+report.rendered.total:undefined}));
+  }catch(e){
+   console.warn("V3 summary image unavailable; still sending originals",e instanceof Error?e.name:"error");
+   await tg("sendMessage",{chat_id:chat,text:phrase(a,"⚠️ មិនអាចបង្កើតរូបសង្ខេបបានទេ។ កំពុងផ្ញើរូបដើមដែលមាន។","⚠️ Summary picture unavailable. Sending available originals.")});
+  }
+ }
+ const albumItems=[...summaryImages,...payload.map((p:any)=>({url:p.media}))];
+ if(albumItems.length)await deliverPhotos(chat,env("TELEGRAM_BOT_TOKEN"),albumItems);
+ else await tg("sendMessage",{chat_id:chat,text:phrase(a,"មិនមានរូបដើមដែលអាចផ្ញើបាន។","No available original invoice pictures.")});
  if(missing.length)await tg("sendMessage",{chat_id:chat,text:phrase(a,"⚠️ មិនមានរូបដើមសម្រាប់វិក្កយបត្រចំនួន៖ ","⚠️ Missing original photos: ")+missing.length});
 }
 async function album(chat:string,a:any){
@@ -243,6 +278,7 @@ async function route(update:any){
   const mode=action.slice(3).replace("open","");
   await customerHome(chat,a,s.customer_id,mode,editId);return true;
  }
+ if(action==="v3:report"){await createReceivableSummary(chat,a);return true;}
  if(action==="v3:album"){await album(chat,a);return true;}
  if(action==="v3:photo"){const s=await session(user);if(s?.invoice_id)await sendPhotos(chat,a,[s.invoice_id]);return true;}
  if(action==="v3:earn"){await earningMenu(chat,a,(await session(user))?.page||0,editId);return true;}
