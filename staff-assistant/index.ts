@@ -98,8 +98,7 @@ async function outstanding(chat:string,a:any,c:any,editId?:number){
  const items=(await customerInvoices(c.customer_id)).filter((i:any)=>num(i.outstanding)>0.000001).sort((x:any,y:any)=>val(x.invoice_date).localeCompare(val(y.invoice_date)));
  const loc=await locationMap();const byCur:any={};for(const i of items){const cur=val(i.currency)||"USD";byCur[cur]=(byCur[cur]||0)+num(i.outstanding);}
  let text="📋 <b>"+phrase(a,"របាយការណ៍បំណុលអតិថិជន","Customer Outstanding Summary")+"</b>\n👤 "+esc(c.customer_name)+"\n📍 "+esc(loc[c.location_code]||c.location_code)+"\n🧾 "+phrase(a,"វិក្កយបត្រនៅជំពាក់","Open invoices")+": "+items.length+"\n";
- text+=Object.keys(byCur).map(x+"").join(""); 
- text= text.replace(/undefined/g,""); 
+ text+=Object.entries(byCur).map(([cur,total])=>money(total,cur)).join(" / "); 
  text+="\n"+(items.length?items.slice(0,35).map((i:any)=>esc(i.invoice_no)+" · "+fmtDate(i.invoice_date)+" · "+money(i.outstanding,i.currency)).join("\n"):phrase(a,"✅ មិនមានវិក្កយបត្រនៅជំពាក់។","✅ No outstanding invoices."));
  const rows=[[[phrase(a,"📸 រូបវិក្កយបត្រដើម","📸 Original Invoice Album"),"v3:album"]],[[phrase(a,"📊 ប្រវត្តិលក់","📊 Sales History"),"v3:salesopen"],[phrase(a,"📦 ការទិញចុងក្រោយ","📦 Last Purchase"),"v3:lastopen"]],...nav(a,"v3:customer")];
  await show(chat,await save(chat,{mode:"customer_open",customer_id:c.customer_id}),text,kb(rows),editId);
