@@ -9,7 +9,7 @@ a{color:#2469ad;text-decoration:none}h1{font-size:23px;margin:5px 0}h2{font-size
 p{line-height:1.55}.card{background:white;border:1px solid #dae5ef;border-radius:16px;padding:20px;margin:18px 0;box-shadow:0 4px 18px #1a3b6410}
 label{font-size:13px;display:grid;gap:7px;font-weight:700}input,select{background:white;border:1px solid #cbd9e5;border-radius:10px;padding:12px;font-size:15px;width:100%;color:#123553}
 .row{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:10px}button{background:#145db4;border:0;color:white;padding:13px 17px;border-radius:10px;font-weight:700;cursor:pointer}button:disabled{opacity:.45;cursor:default}
-button.revoke{background:white;color:#b52036;border:1px solid #e9bfc5;font-size:12px;padding:7px 9px}
+button.edit{background:#eaf3ff;color:#145db4;border:1px solid #aacbf1;font-size:12px;padding:7px 9px;margin-right:7px}button.revoke{background:white;color:#b52036;border:1px solid #e9bfc5;font-size:12px;padding:7px 9px}
 .small{font-size:13px;color:#688096}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:11px 8px;border-bottom:1px solid #e1e9f0}th{color:#688096}#message{min-height:25px;font-weight:700}
 @media(max-width:700px){.row{grid-template-columns:1fr}table{font-size:11px}}
 </style></head><body>
@@ -24,13 +24,14 @@ button.revoke{background:white;color:#b52036;border:1px solid #e9bfc5;font-size:
 </form><p id="message" role="status"></p>
 <p class="small">Only active staff are listed. The bot checks that the Telegram ID is a reachable private chat before saving. One active private Telegram mapping per staff.</p></section>
 <section class="card"><h2>2. Verified private staff accounts</h2><div style="overflow-x:auto"><table><thead><tr><th>Staff</th><th>Telegram User ID</th><th>Language</th><th>Access</th><th></th></tr></thead><tbody id="mappingRows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div></section>
-<section class="card"><h2>3. Privacy and testing</h2>
+<section class="card" id="editPanel" hidden><h2>3. Edit linked Staff ID</h2><p class="small">Change the staff assigned to this existing Telegram account without revoking the link. The bot will clear its temporary navigation session.</p><form id="editForm" class="row"><label>Telegram User ID<input id="editTelegramId" readonly></label><label>New BIG BROTHER Staff<select id="editStaffSelect" required></select></label><button id="editSave" type="submit">Save Staff ID</button></form><p><button id="editCancel" type="button" style="background:#eef3f9;color:#193858">Cancel</button></p></section>
+<section class="card"><h2>4. Privacy and testing</h2>
 <p>Staff types <b>/staff</b> in their Telegram private chat to open the live assistant. Their messages, searches, invoice photos, and Telegram snapshots are <b>not archived</b> by V3. Only approved mapping/language and temporary navigation IDs are kept; navigation IDs expire in 30 minutes and are cleaned every 15 minutes.</p>
 <p class="small">Earnings requests go to Staff Relation → Admin Work. No payout happens automatically. Existing bank-review group routing is unchanged.</p></section>
 <script>
 const URL="https://sjfhlaclgmkwwofzstok.supabase.co",KEY="sb_publishable_w762jR65CWwlO30fKQsYOw_6L9grx8S",STORE="BB_SUPABASE_DEV_SESSION_V1";
 const el=id=>document.getElementById(id);
-let staff=[];
+let staff=[];let mappings=[];
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function status(msg,ok=false){el("message").textContent=msg;el("message").style.color=ok?"#178048":"#b3263c";}
 async function token(){
@@ -49,14 +50,17 @@ async function call(body){
 async function load(){
  el("refresh").disabled=true;
  try{
-  const d=await call({action:"list"});staff=d.staff||[];
+  const d=await call({action:"list"});staff=d.staff||[];mappings=d.mappings||[];
   el("staffSelect").innerHTML=staff.map(s=>'<option value="'+esc(s.staff_id)+'">'+esc(s.staff_name)+" ("+esc(s.staff_id)+")</option>").join("");
   const names=Object.fromEntries(staff.map(s=>[s.staff_id,s.staff_name]));
-  el("mappingRows").innerHTML=(d.mappings||[]).map(a=>'<tr><td>'+esc(names[a.staff_id]||a.staff_id)+'</td><td>'+esc(a.telegram_user_id)+'</td><td>'+esc(a.language==="km"?"ភាសាខ្មែរ":"English")+'</td><td>'+esc(a.active?"✅ Active":"⏸ Revoked")+'</td><td>'+(a.active?'<button class="revoke" data-user="'+esc(a.telegram_user_id)+'">Revoke</button>':"")+'</td></tr>').join("")||'<tr><td colspan="5">No verified private staff accounts yet.</td></tr>';
+  el("mappingRows").innerHTML=mappings.map(a=>'<tr><td>'+esc(names[a.staff_id]||a.staff_id)+'</td><td>'+esc(a.telegram_user_id)+'</td><td>'+esc(a.language==="km"?"ភាសាខ្មែរ":"English")+'</td><td>'+esc(a.active?"✅ Active":"⏸ Revoked")+'</td><td>'+(a.active?'<button class="edit" data-user="'+esc(a.telegram_user_id)+'">Edit Staff ID</button><button class="revoke" data-user="'+esc(a.telegram_user_id)+'">Revoke</button>':"")+'</td></tr>').join("")||'<tr><td colspan="5">No verified private staff accounts yet.</td></tr>';
+  el("mappingRows").querySelectorAll(".edit").forEach(b=>b.onclick=()=>{const m=mappings.find(a=>String(a.telegram_user_id)===b.dataset.user);if(!m)return;el("editTelegramId").value=String(m.telegram_user_id);el("editStaffSelect").innerHTML=staff.map(x=>'<option value="'+esc(x.staff_id)+'">'+esc(x.staff_name)+" ("+esc(x.staff_id)+")</option>").join("");el("editStaffSelect").value=m.staff_id;el("editPanel").hidden=false;el("editPanel").scrollIntoView({behavior:"smooth",block:"center"});});
   el("mappingRows").querySelectorAll(".revoke").forEach(b=>b.onclick=async()=>{if(!confirm("Revoke this private Telegram access?"))return;try{await call({action:"revoke",telegram_user_id:b.dataset.user});status("Private access revoked.",true);await load();}catch(e){status(e.message);}});
  }catch(e){status(e.message);el("mappingRows").innerHTML='<tr><td colspan="5">'+esc(e.message)+'</td></tr>';}
  finally{el("refresh").disabled=false;}
 }
 el("mappingForm").onsubmit=async e=>{e.preventDefault();el("save").disabled=true;try{await call({action:"save",telegram_user_id:el("telegramId").value.trim(),staff_id:el("staffSelect").value});status("✅ Account verified. The staff member can now send /staff in private chat.",true);el("telegramId").value="";await load();}catch(e){status(e.message);}finally{el("save").disabled=false;}};
+el("editCancel").onclick=()=>{el("editPanel").hidden=true;};
+el("editForm").onsubmit=async e=>{e.preventDefault();const telegram=el("editTelegramId").value,staffId=el("editStaffSelect").value;const match=staff.find(s=>String(s.staff_id)===staffId);if(!confirm("Change staff assignment for Telegram "+telegram+" to "+(match?.staff_name||staffId)+" ("+staffId+")? The bot will reset its temporary session."))return;el("editSave").disabled=true;try{await call({action:"reassign",telegram_user_id:telegram,staff_id:staffId});status("✅ Staff ID updated. Ask this Telegram account to send /staff again.",true);el("editPanel").hidden=true;await load();}catch(err){status(err.message);}finally{el("editSave").disabled=false;}};
 el("refresh").onclick=load;load();
 </script></body></html>
