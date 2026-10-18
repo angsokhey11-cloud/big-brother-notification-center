@@ -38,10 +38,19 @@ async function save(id:string,patch:any){
  if(error)throw error;
  return payload;
 }
-async function show(chat:string,s:any,html:string,keyboard:any,editId?:number){
+// Typed staff text starts a new bot turn. Button-only navigation continues editing the active menu.
+// Retire only the prior bot menu, never the staff's typed message, and only after a successful reply.
+async function show(chat:string,s:any,html:string,keyboard:any,editId?:number,typedReply=false){
  const data={chat_id:chat,text:html.slice(0,3950),parse_mode:"HTML",disable_web_page_preview:true,reply_markup:keyboard};
  let result:any;
- if(editId){try{result=await tg("editMessageText",{...data,message_id:editId});}catch(_){result=await tg("sendMessage",data);}}
+ if(typedReply){
+  result=await tg("sendMessage",data);
+  const previous=Number(s?.menu_message_id||0);
+  if(previous>0&&previous!==Number(result?.message_id||0)){
+   try{await tg("deleteMessage",{chat_id:chat,message_id:previous});}
+   catch(_){await tg("editMessageReplyMarkup",{chat_id:chat,message_id:previous,reply_markup:{inline_keyboard:[]}}).catch(()=>{});}
+  }
+ }else if(editId){try{result=await tg("editMessageText",{...data,message_id:editId});}catch(_){result=await tg("sendMessage",data);}}
  else if(s?.menu_message_id){try{result=await tg("editMessageText",{...data,message_id:s.menu_message_id});}catch(_){result=await tg("sendMessage",data);}}
  else result=await tg("sendMessage",data);
  await save(chat,{menu_message_id:Number(result?.message_id||editId||s?.menu_message_id||0)});
@@ -55,8 +64,8 @@ function mainKeys(a:any){return kb([
  [[phrase(a,"📨 ស្ថានភាពសំណើ","📨 Request Status"),"v3:requests"],[phrase(a,"📜 ប្រវត្តិបើកប្រាក់","📜 Payment History"),"v3:history"]],
  [[phrase(a,"🌐 ប្តូរភាសា","🌐 Change Language"),"v3:language"]]
 ]);}
-async function main(chat:string,a:any,editId?:number){const s=await save(chat,{mode:"menu",page:0,selected_earning_ids:[]});await show(chat,s,"🤖 <b>BIG BROTHER Staff Assistant V3</b>\n"+phrase(a,"សូមជ្រើសរើសមុខងារខាងក្រោម។","Choose a function below.")+"\n🔐 "+esc(a.staff_name),mainKeys(a),editId);}
-async function languageMenu(chat:string,a:any,editId?:number){const s=await save(chat,{mode:"language"});await show(chat,s,"🌐 <b>BIG BROTHER</b>\nសូមជ្រើសរើសភាសា។\nPlease choose your language.",kb([[["🇰🇭 ភាសាខ្មែរ","v3:lang:km"],["🇬🇧 English","v3:lang:en"]]]),editId);}
+async function main(chat:string,a:any,editId?:number,typedReply=false){const s=await save(chat,{mode:"menu",page:0,selected_earning_ids:[]});await show(chat,s,"🤖 <b>BIG BROTHER Staff Assistant V3</b>\n"+phrase(a,"សូមជ្រើសរើសមុខងារខាងក្រោម។","Choose a function below.")+"\n🔐 "+esc(a.staff_name),mainKeys(a),editId,typedReply);}
+async function languageMenu(chat:string,a:any,editId?:number,typedReply=false){const s=await save(chat,{mode:"language"});await show(chat,s,"🌐 <b>BIG BROTHER</b>\nសូមជ្រើសរើសភាសា។\nPlease choose your language.",kb([[["🇰🇭 ភាសាខ្មែរ","v3:lang:km"],["🇬🇧 English","v3:lang:en"]]]),editId,typedReply);}
 async function locationMap(){
  const {data,error}=await db().from("locations").select("location_code,location_name");
  if(error)throw error;return Object.fromEntries((data||[]).map((x:any)=>[x.location_code,x.location_name]));
@@ -72,12 +81,12 @@ async function askCustomer(chat:string,a:any,mode:string,editId?:number){
  const t=titles[mode]||titles.customer;
  await show(chat,s,"<b>"+phrase(a,t[0],t[1])+"</b>\n"+phrase(a,"សូមវាយឈ្មោះអតិថិជន (អាចវាយត្រឹម ៣ តួអក្សរ រួមទាំងស្រៈ)។","Type the customer name (3 or more matching characters)."),kb(nav(a)),editId);
 }
-async function customerSearch(chat:string,a:any,mode:string,input:string){
- const q=norm(input);if([...q].length<3){await show(chat,await session(chat),phrase(a,"⚠️ សូមវាយយ៉ាងហោចណាស់ ៣ តួអក្សរ។","⚠️ Please enter at least 3 characters."),kb(nav(a,"v3:"+mode)));return;}
+async function customerSearch(chat:string,a:any,mode:string,input:string,typedReply=false){
+ const q=norm(input);if([...q].length<3){await show(chat,await session(chat),phrase(a,"⚠️ សូមវាយយ៉ាងហោចណាស់ ៣ តួអក្សរ។","⚠️ Please enter at least 3 characters."),kb(nav(a,"v3:"+mode)),undefined,typedReply);return;}
  const loc=await locationMap();const customers=(await allCustomers()).map((c:any)=>({...c,_score:score(c.customer_name,q)})).filter((c:any)=>c._score<9).sort((x:any,y:any)=>x._score-y._score||norm(x.customer_name).localeCompare(norm(y.customer_name)));
- if(!customers.length){await show(chat,await session(chat),phrase(a,"រកមិនឃើញអតិថិជនដែលផ្គូផ្គងទេ។ សូមសាកល្បងឈ្មោះផ្សេង។","No matching customers. Try another name."),kb(nav(a,"v3:"+mode)));return;}
+ if(!customers.length){await show(chat,await session(chat),phrase(a,"រកមិនឃើញអតិថិជនដែលផ្គូផ្គងទេ។ សូមសាកល្បងឈ្មោះផ្សេង។","No matching customers. Try another name."),kb(nav(a,"v3:"+mode)),undefined,typedReply);return;}
  const buttons=customers.slice(0,15).map((c:any)=>[[val(c.customer_name).slice(0,38)+" · "+val(loc[c.location_code]||c.location_code).slice(0,20),"v3:c:"+mode+":"+c.customer_id]]);
- await show(chat,await session(chat),phrase(a,"🔎 សូមជ្រើសរើសអតិថិជន៖","🔎 Choose the correct customer:")+"\n"+phrase(a,"រកឃើញ៖ ","Matches: ")+customers.length,kb([...buttons,...nav(a,"v3:"+mode)]));
+ await show(chat,await session(chat),phrase(a,"🔎 សូមជ្រើសរើសអតិថិជន៖","🔎 Choose the correct customer:")+"\n"+phrase(a,"រកឃើញ៖ ","Matches: ")+customers.length,kb([...buttons,...nav(a,"v3:"+mode)]),undefined,typedReply);
 }
 async function customerHome(chat:string,a:any,id:string,mode:string,editId?:number){
  const {data:c}=await db().from("customers").select("customer_id,customer_name,location_code").eq("customer_id",id).maybeSingle();
@@ -117,26 +126,26 @@ async function last(chat:string,a:any,c:any,editId?:number){
  await show(chat,await save(chat,{customer_id:c.customer_id,mode:"customer_open"}),t,kb(nav(a,"v3:customer")),editId);
 }
 function parseDate(v:string){let m=v.trim().match(/^(\d{1,2})[-\/](\d{1,2}|[a-zA-Z]{3})[-\/](\d{2}|\d{4})$/);if(!m)return null;const names=["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];let mm=/^\d+$/.test(m[2])?Number(m[2]):names.indexOf(m[2].toLowerCase())+1;let y=Number(m[3]);if(y<100)y+=2000;const date=new Date(Date.UTC(y,mm-1,Number(m[1])));if(mm<1||mm>12||date.getUTCDate()!=Number(m[1])||date.getUTCMonth()!=mm-1||date.getUTCFullYear()!=y)return null;return y+"-"+String(mm).padStart(2,"0")+"-"+m[1].padStart(2,"0");}
-async function invoiceSearch(chat:string,a:any,input:string){
+async function invoiceSearch(chat:string,a:any,input:string,typedReply=false){
  const str=val(input);const match=str.match(/^(.*?)\s*\/\s*(\d{1,2}[-\/](?:\d{1,2}|[a-zA-Z]{3})[-\/]\d{2,4})$/);
  let found:any[]=[];
- if(match){const dt=parseDate(match[2]);if(!dt){await show(chat,await session(chat),phrase(a,"កាលបរិច្ឆេទមិនត្រឹមត្រូវ។","Invalid invoice date."),kb(nav(a,"v3:invoice")));return;}
+ if(match){const dt=parseDate(match[2]);if(!dt){await show(chat,await session(chat),phrase(a,"កាលបរិច្ឆេទមិនត្រឹមត្រូវ។","Invalid invoice date."),kb(nav(a,"v3:invoice")),undefined,typedReply);return;}
  const names=(await allCustomers()).map((x:any)=>({...x,_score:score(x.customer_name,match[1])})).filter((x:any)=>x._score<9).sort((x:any,y:any)=>x._score-y._score);if(names.length){const ids=names.map((x:any)=>x.customer_id);const {data}=await db().from("invoices").select("invoice_id,invoice_no,invoice_date,customer_id,customer_name_snapshot,location_code").eq("invoice_date",dt).in("customer_id",ids).limit(150);found=(data||[]).sort((x:any,y:any)=>ids.indexOf(x.customer_id)-ids.indexOf(y.customer_id));}}
  else{const {data}=await db().from("invoices").select("invoice_id,invoice_no,invoice_date,customer_id,customer_name_snapshot,location_code").eq("invoice_no",str).limit(50);found=data||[];}
- if(!found.length){await show(chat,await session(chat),phrase(a,"រកមិនឃើញវិក្កយបត្រ។ សូមសាកល្បងម្ដងទៀត។","Invoice not found. Please try again."),kb(nav(a,"v3:invoice")));return;}
- if(found.length===1&&!match){await invoiceOpen(chat,a,found[0].invoice_id);return;}
+ if(!found.length){await show(chat,await session(chat),phrase(a,"រកមិនឃើញវិក្កយបត្រ។ សូមសាកល្បងម្ដងទៀត។","Invoice not found. Please try again."),kb(nav(a,"v3:invoice")),undefined,typedReply);return;}
+ if(found.length===1&&!match){await invoiceOpen(chat,a,found[0].invoice_id,undefined,typedReply);return;}
  const loc=await locationMap();const rows=found.slice(0,15).map((i:any)=>[[esc(i.invoice_no)+" · "+val(i.customer_name_snapshot).slice(0,28)+" · "+val(loc[i.location_code]||i.location_code).slice(0,15)+" · "+fmtDate(i.invoice_date),"v3:i:"+i.invoice_id]]);
- await show(chat,await save(chat,{mode:"invoice_open"}),phrase(a,"🧾 សូមជ្រើសរើសវិក្កយបត្រ៖","🧾 Please select the correct invoice:"),kb([...rows,...nav(a,"v3:invoice")]));
+ await show(chat,await save(chat,{mode:"invoice_open"}),phrase(a,"🧾 សូមជ្រើសរើសវិក្កយបត្រ៖","🧾 Please select the correct invoice:"),kb([...rows,...nav(a,"v3:invoice")]),undefined,typedReply);
 }
-async function invoiceOpen(chat:string,a:any,id:string,editId?:number){
+async function invoiceOpen(chat:string,a:any,id:string,editId?:number,typedReply=false){
  const {data:i}=await db().from("invoices").select("invoice_id,invoice_no,invoice_date,customer_id,customer_name_snapshot,location_code,currency,grand_total,amount_paid,outstanding,status").eq("invoice_id",id).maybeSingle();
- if(!i){await main(chat,a,editId);return;}
+ if(!i){await main(chat,a,editId,typedReply);return;}
  const {data:lines}=await db().from("invoice_lines").select("product_name_snapshot,qty,unit_price,line_total").eq("invoice_id",id).order("line_no");
  const loc=await locationMap();
  let t="🧾 <b>"+phrase(a,"ព័ត៌មានវិក្កយបត្រ","Invoice Details")+"</b>\nNo. "+esc(i.invoice_no)+" · "+fmtDate(i.invoice_date)+"\n👤 "+esc(i.customer_name_snapshot)+"\n📍 "+esc(loc[i.location_code]||i.location_code)+"\n";
  for(const x of (lines||[]).slice(0,25))t+="\n• "+esc(x.product_name_snapshot)+" × "+num(x.qty)+" @ "+money(x.unit_price,i.currency);
  t+="\n\n"+phrase(a,"សរុប","Total")+": "+money(i.grand_total,i.currency)+"\n"+phrase(a,"បានបង់","Paid")+": "+money(i.amount_paid,i.currency)+"\n"+phrase(a,"នៅជំពាក់","Outstanding")+": "+money(i.outstanding,i.currency)+"\n"+phrase(a,"ស្ថានភាព","Status")+": "+esc(i.status);
- await show(chat,await save(chat,{mode:"invoice_open",invoice_id:id}),t,kb([[[phrase(a,"📷 រូបវិក្កយបត្រដើម","📷 Original Invoice Photo"),"v3:photo"]],...nav(a,"v3:invoice")]),editId);
+ await show(chat,await save(chat,{mode:"invoice_open",invoice_id:id}),t,kb([[[phrase(a,"📷 រូបវិក្កយបត្រដើម","📷 Original Invoice Photo"),"v3:photo"]],...nav(a,"v3:invoice")]),editId,typedReply);
 }
 async function sendPhotos(chat:string,a:any,invoiceIds:string[],summary?:{name:string, count:number,total:string}){
  if(!invoiceIds.length){await tg("sendMessage",{chat_id:chat,text:phrase(a,"មិនមានរូបវិក្កយបត្រដើមដែលត្រូវផ្ញើ។","No original invoice photos to send.")});return;}
@@ -220,8 +229,8 @@ async function route(update:any){
  if(!cb&&!start&&!staffCommand&&!/^\/language(?:@\w+)?$/i.test(input)&&!await session(user))return false;
  const editId=cb?Number(m.message_id):undefined;
  if(cb)await tg("answerCallbackQuery",{callback_query_id:cb.id}).catch(()=>{});
- if(start||staffCommand){if(!a.language_confirmed)await languageMenu(chat,a,editId);else await main(chat,a,editId);return true;}
- if(input.startsWith("/language")||action==="v3:language"){await languageMenu(chat,a,editId);return true;}
+ if(start||staffCommand){if(!a.language_confirmed)await languageMenu(chat,a,editId,!cb);else await main(chat,a,editId,!cb);return true;}
+ if(input.startsWith("/language")||action==="v3:language"){await languageMenu(chat,a,editId,!cb);return true;}
  if(action.startsWith("v3:lang:")){const l=action.endsWith(":en")?"en":"km";await db().from("bb_staff_assistant_accounts").update({language:l,language_confirmed:true,updated_at:new Date().toISOString()}).eq("telegram_user_id",user);await main(chat,{...a,language:l},editId);return true;}
  if(action==="v3:home"){await main(chat,a,editId);return true;}
  const modes=["customer","sales","ar","summary","last"];
@@ -264,8 +273,8 @@ async function route(update:any){
  if(action==="v3:requests"||action==="v3:history"){await requests(chat,a,action==="v3:history",editId);return true;}
  if(!cb&&input&&!input.startsWith("/")){
   const s=await session(user);
-  if(s?.mode==="query_invoice"){await invoiceSearch(chat,a,input);return true;}
-  if(val(s?.mode).startsWith("query_")){await customerSearch(chat,a,s.mode.slice(6),input);return true;}
+  if(s?.mode==="query_invoice"){await invoiceSearch(chat,a,input,true);return true;}
+  if(val(s?.mode).startsWith("query_")){await customerSearch(chat,a,s.mode.slice(6),input,true);return true;}
  }
  return false;
 }
