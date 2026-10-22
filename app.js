@@ -13,6 +13,21 @@ const pages = {
   logs: 'Delivery Logs',
 };
 
+// Explicit allow-list: only these existing BIG BROTHER pages can be embedded.
+// They share the GitHub Pages origin with this Telegram Manager workspace.
+const TOOL_ORIGIN = 'https://angsokhey11-cloud.github.io';
+const TOOL_PATHS = Object.freeze({
+  'invoice-photo-organizer': {title:'Invoice Photo Organizer',path:'/big-brother-notification-center/invoice-photo-organizer.html'},
+  'bank-review-routing': {title:'Bank Personal Review Routes',path:'/big-brother-notification-center/bank-review-routing.html'},
+  'assistant-topic-mapping': {title:'Assistant Topic Mapping',path:'/big-brother-admin-work/assistant-topic-mapping.html'},
+  'telegram-team-groups': {title:'Telegram Team Groups',path:'/big-brother-admin-work/telegram-team-groups.html'},
+  'bank-assistant-setup': {title:'Bank Assistant Setup',path:'/big-brother-admin-work/bank-assistant-setup.html'},
+  'customer-bank-directory': {title:'Customer Bank Directory',path:'/big-brother-admin-work/customer-bank-directory.html'},
+  'staff-assistant-mapping': {title:'Private Staff Mapping',path:'/big-brother-notification-center/staff-assistant-mapping.html'},
+});
+const TOOL_STYLESHEET=TOOL_ORIGIN+'/big-brother-notification-center/telegram-workspace-tools-v1.css?v=20261022-dark1';
+
+
 const RULE_ORDER = [
   'overdue_invoice',
   'request_submitted',
@@ -28,6 +43,9 @@ const pageTitle = document.getElementById('pageTitle');
 const refreshBtn = document.getElementById('refreshBtn');
 const testMessageBtn = document.getElementById('testMessageBtn');
 const toast = document.getElementById('toast');
+const toolFrame = document.getElementById('toolWorkspaceFrame');
+const toolError = document.getElementById('toolWorkspaceError');
+let currentTool = null;
 
 let session = null;
 let state = {
@@ -72,12 +90,121 @@ function setBusy(button, busy, busyText = 'Working…') {
   }
 }
 
-function setPage(name) {
-  navItems.forEach((item) => item.classList.toggle('active', item.dataset.page === name));
-  pageSections.forEach((section) => section.classList.toggle('active', section.id === `page-${name}`));
-  pageTitle.textContent = pages[name] || 'Notification Center';
-  window.location.hash = name === 'overview' ? '' : name;
+function pageVisible(name){
+  navItems.forEach(item=>item.classList.toggle('active',item.dataset.page===name));
+  pageSections.forEach(section=>section.classList.toggle('active',section.id==='page-'+name));
+  pageTitle.textContent=pages[name]||'Notification Center';
 }
+
+function setPage(name,changeHash=true){
+  if(!pages[name])return;
+  if(currentTool){
+    // Unmount an inactive admin tool: releases its timers/API requests instead
+    // of keeping the old app running invisibly behind the next page.
+    currentTool=null;
+    if(toolFrame)toolFrame.src='about:blank';
+  }
+  pageVisible(name);
+  if(changeHash)window.location.hash=name==='overview'?'':name;
+}
+
+function toolURL(key){
+  const tool=TOOL_PATHS[key];
+  if(!tool)return '';
+  return TOOL_ORIGIN+tool.path+'?embed=1&bbTelegramWorkspace=1';
+}
+
+function activateToolUI(key,changeHash=true){
+  currentTool=key;
+  navItems.forEach(item=>item.classList.toggle('active',item.dataset.tool===key));
+  pageSections.forEach(section=>section.classList.toggle('active',section.id==='page-toolWorkspace'));
+  pageTitle.textContent=TOOL_PATHS[key].title;
+  toolFrame.title='BIG BROTHER — '+TOOL_PATHS[key].title;
+  if(toolError){toolError.textContent='';toolError.hidden=true;}
+  if(changeHash)window.location.hash='tool-'+key;
+}
+
+function openTool(key,changeHash=true){
+  const target=toolURL(key);
+  if(!target||!toolFrame)return false;
+  const wasTool=currentTool;
+  activateToolUI(key,changeHash);
+  if(wasTool!==key||toolFrame.getAttribute('src')==='about:blank'||
+      !toolFrame.getAttribute('src')){
+    toolFrame.src=target;
+  }
+  return true;
+}
+
+function toolKeyFromPath(path){
+  return Object.keys(TOOL_PATHS).find(key=>TOOL_PATHS[key].path===path)||'';
+}
+
+function toolFrameLoaded(){
+  // Never style or route arbitrary web pages. All tools must match the exact
+  // same-origin allow-list (including when staff use in-tool Back links).
+  let child,locationURL;
+  try{
+    child=toolFrame.contentDocument;
+    locationURL=new URL(toolFrame.contentWindow.location.href);
+  }catch(_){
+    if(toolError){
+      toolError.textContent='This page could not be embedded. Use the Telegram sidebar to open another function.';
+      toolError.hidden=false;
+    }
+    return;
+  }
+  if(locationURL.href==='about:blank')return;
+  const key=locationURL.origin===TOOL_ORIGIN?toolKeyFromPath(locationURL.pathname):'';
+  if(!key){
+    toolFrame.src='about:blank';
+    if(toolError){
+      toolError.textContent='Navigation outside the approved BIG BROTHER Telegram tools was blocked.';
+      toolError.hidden=false;
+    }
+    return;
+  }
+  if(currentTool!==key)activateToolUI(key,true);
+  try{
+    child.documentElement.style.background='#07101f';
+    if(child.body)child.body.style.background='#07101f';
+    if(!child.getElementById('bbTelegramWorkspaceToolTheme')){
+      const link=child.createElement('link');
+      link.id='bbTelegramWorkspaceToolTheme';
+      link.rel='stylesheet';
+      link.href=TOOL_STYLESHEET;
+      child.head.appendChild(link);
+    }
+    // Existing Back / Manage links keep the user in this same Telegram
+    // workspace; the target modules retain all original forms and handlers.
+    if(!child.__bbTelegramWorkspaceLinksBound){
+      child.__bbTelegramWorkspaceLinksBound=true;
+      child.addEventListener('click',event=>{
+        const anchor=event.target.closest?.('a[href]');
+        if(!anchor)return;
+        let href;
+        try{href=new URL(anchor.href,locationURL.href);}catch(_){return}
+        if(href.origin!==TOOL_ORIGIN)return;
+        const targetKey=toolKeyFromPath(href.pathname);
+        const backToManager=
+          href.pathname==='/big-brother-notification-center/'||
+          href.pathname==='/big-brother-notification-center/index.html'||
+          href.pathname==='/big-brother-admin-work/'||
+          href.pathname==='/big-brother-admin-work/index.html';
+        if(!targetKey&&!backToManager)return;
+        event.preventDefault();
+        if(targetKey)openTool(targetKey);
+        else setPage('overview');
+      },true);
+    }
+  }catch(error){
+    if(toolError){
+      toolError.textContent='Could not apply the shared dark theme: '+(error?.message||String(error));
+      toolError.hidden=false;
+    }
+  }
+}
+
 
 function readSession() {
   try {
@@ -566,10 +693,27 @@ async function bootstrap(showMessage = true) {
 }
 
 navItems.forEach((item) => {
-  item.addEventListener('click', () => setPage(item.dataset.page));
+  item.addEventListener('click', () => {
+    if(item.dataset.tool)openTool(item.dataset.tool);
+    else if(item.dataset.page)setPage(item.dataset.page);
+  });
 });
+document.querySelectorAll('[data-tool]:not(.nav-item)').forEach(item=>{
+  item.addEventListener('click',event=>{
+    event.preventDefault();
+    openTool(item.dataset.tool);
+  });
+});
+document.getElementById('toolWorkspaceBack')?.addEventListener('click',()=>setPage('overview'));
+toolFrame?.addEventListener('load',toolFrameLoaded);
+
 
 refreshBtn.addEventListener('click', async () => {
+  if(currentTool&&toolFrame){
+    // Refresh only the active tool; do not restart Notification Center data.
+    toolFrame.src=toolURL(currentTool);
+    return;
+  }
   setBusy(refreshBtn, true, 'Refreshing…');
   try {
     await bootstrap(false);
@@ -594,11 +738,19 @@ testMessageBtn.addEventListener('click', async () => {
 });
 
 const initialPage = window.location.hash.replace('#', '');
-if (initialPage && pages[initialPage]) setPage(initialPage);
+if(initialPage.startsWith('tool-')&&TOOL_PATHS[initialPage.slice(5)]){
+  openTool(initialPage.slice(5),false);
+}else if(initialPage&&pages[initialPage]){
+  setPage(initialPage,false);
+}
 
-window.addEventListener('hashchange', () => {
-  const name = window.location.hash.replace('#', '') || 'overview';
-  if (pages[name]) setPage(name);
+window.addEventListener('hashchange',()=>{
+  const name=window.location.hash.replace('#','')||'overview';
+  if(name.startsWith('tool-')&&TOOL_PATHS[name.slice(5)]){
+    openTool(name.slice(5),false);
+  }else if(pages[name]){
+    setPage(name,false);
+  }
 });
 
 bootstrap(false).catch(() => {});
