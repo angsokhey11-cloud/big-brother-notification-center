@@ -1,0 +1,94 @@
+/* BIG BROTHER Telegram Manager — shared embedded-tool dark theme V1.
+   Loaded ONLY inside the approved Telegram Manager tool iframe.
+   Presentation-only: does not modify app JS, financial forms, or photo pixels.
+   Colors match styles.css in the parent Notification Center workspace. */
+:root{
+  color-scheme:dark!important;
+  background:#07101f!important;
+  color:#e8eef8!important;
+  --bg:#07101f;
+  --panel:#101f34;
+  --panel-2:#15253e;
+  --border:#304660;
+  --text:#e8eef8;
+  --muted:#a7bad2;
+  --primary:#35a7ff;
+}
+html,body{
+  background:#07101f!important;
+  color:#e8eef8!important;
+  min-height:100%;
+}
+body{font-family:Inter,system-ui,Arial,"Noto Sans Khmer",sans-serif!important;}
+body main,body .wrap{color:#e8eef8!important;}
+body h1,body h2,body h3,body h4,body strong,body b,body label{
+  color:#e8eef8!important;
+}
+body p,body small,body .small,body .subtle{
+  color:#a9bdd5!important;
+}
+body a,body a:visited{color:#7fc8ff!important;}
+body a:hover{color:#addfff!important;}
+body :is(section,.card,.panel,.item,.row,.status,.notice,.message,.auth-card,.modal-card){
+  border-color:#304660!important;
+}
+body :is(section,.card,.panel,.item,.auth-card,.modal-card){
+  background:#101f34!important;
+  color:#e8eef8!important;
+  box-shadow:0 8px 25px #03091330!important;
+}
+body :is(.row,.status,.notice,.message){
+  background:#0c1b2e!important;
+  color:#cfe0f5!important;
+}
+body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+body select,body textarea{
+  background:#08192c!important;
+  border-color:#45627f!important;
+  color:#edf5ff!important;
+  caret-color:#85d1ff;
+}
+body :is(input,select,textarea)::placeholder{color:#879eb8!important;opacity:1;}
+body :is(input,select,textarea):focus{
+  outline:2px solid #35a7ff!important;
+  outline-offset:1px!important;
+  border-color:#35a7ff!important;
+}
+body input[type=checkbox],body input[type=radio]{accent-color:#35a7ff;}
+body button:not(.secondary):not(.light):not(.danger):not(.revoke):not(.admin-remove),
+body .link:not(.secondary):not(.danger){
+  background:#2299ed!important;
+  color:#071726!important;
+  border-color:#2299ed!important;
+}
+body button:is(.secondary,.light,.edit),
+body .secondary{
+  background:#223c59!important;
+  color:#e5f1ff!important;
+  border-color:#3a5878!important;
+}
+body button:is(.danger,.revoke,.admin-remove){
+  background:#4e2535!important;
+  color:#ffd4dc!important;
+  border:1px solid #8a4556!important;
+}
+body button:disabled{opacity:.48!important;cursor:not-allowed!important;}
+body table{color:#e8eef8!important;border-color:#304660!important;}
+body th{background:#13263f!important;color:#b2cbe7!important;}
+body td{color:#e8eef8!important;}
+body th,body td{border-color:#304660!important;}
+body tr:nth-child(even){background:#0d2036!important;}
+body :is(pre,code,kbd){color:#a5dbff;}
+body .hidden,body .hide{display:none!important;}
+body [hidden]{display:none!important;}
+body .error,body [role=alert]{color:#ffb7c2!important;}
+body :is(#status,#message,.status,.message)[style*="#b42318"],
+body :is(#status,#message,.status,.message)[style*="#bd2833"]{color:#ffbdc8!important;}
+body :is(#status,#message,.status,.message)[style*="#174f7f"],
+body :is(#status,#message,.status,.message)[style*="#245581"]{color:#bce0ff!important;}
+body :is(.wrap,main){max-width:1200px;}
+body ::selection{background:#285b86;color:#fff;}
+@media(max-width:620px){
+  body .wrap,body main{padding-left:12px!important;padding-right:12px!important;}
+  body :is(.card,.panel,section){padding:14px!important;}
+}
