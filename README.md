@@ -70,6 +70,53 @@ The current UI is a standalone foundation with:
 The next implementation step is a secure authenticated admin API/Edge Function that supplies live data to this page without exposing service credentials or Telegram secrets.
 
 
+## Telegram Manager integrated workspace (2026-10-22)
+
+The BIG BROTHER Dashboard opens Telegram Manager inside its module workspace.
+The previous Notification Center sidebar linked to several separate pages
+outside the Telegram shell; many of the Admin Work pages had a light theme.
+
+The sidebar now opens these modules **inside the same Telegram workspace**:
+
+- Invoice Photo Organizer
+- Bank Personal Review Routes
+- Assistant Topic Mapping
+- Telegram Team Groups
+- Bank Assistant Setup
+- Customer Bank Directory
+- Private Staff Mapping (also available from the original Staff section)
+
+Implementation and safeguards:
+
+- `index.html` uses `data-tool` navigation and one trusted frame
+  (`#toolWorkspaceFrame`); `app.js` uses a **fixed URL allow-list**. It
+  does not embed arbitrary URLs from search boxes or user input.
+- The seven tools keep their **original HTML, JavaScript, session checks,
+  permission rules and API routes** at their existing GitHub Pages paths.
+  No bot, invoice, payment or A/R logic is changed.
+- Approved frames share the `https://angsokhey11-cloud.github.io` origin.
+  The parent injects `telegram-workspace-tools-v1.css` on load to harmonize
+  the paper background, forms, cards, tables, status text and buttons with
+  the Telegram Manager dark palette. It **never processes image pixels**.
+- Back and Manage links between approved tools stay within the Telegram
+  workspace. The sidebar remains visible; Telegram Overview remains accessible.
+  A new tool has a `#tool-...` hash for refresh/deep link. Refresh affects
+  the active tool rather than triggering a second notification data reload.
+- Switching back to a normal Notification Center page unloads the old iframe
+  via `about:blank` to release hidden timers and client-side activity.
+  Attempts to iframe-navigate outside the approved tool paths are blocked.
+- Underlying applications remain authenticated and authorized as before.
+  The shared CSS does not grant access or alter security controls.
+
+QA: synthetic DOM test of all seven links, first click, current selection,
+internal navigation, hash, theme injection, refresh, Back and blocked external
+frame navigation. JS syntax and known URL checks passed. Signed-in browser
+acceptance is still required.
+
+Deployment: GitHub Pages frontend only. **No SQL migration**, new tables or
+Cloud-to-Local business-data sync. Reload the Dashboard / Telegram Manager
+after GitHub Pages updates; Local Brain database needs no migration.
+
 ## Customer Telegram invoice delivery
 
 The Notification Center also manages customer-specific invoice delivery:

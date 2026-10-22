@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0b1220" />
   <title>BIG BROTHER • Notification Center</title>
-  <link rel="stylesheet" href="styles.css?v=20260920-artelegram2" />
+  <link rel="stylesheet" href="styles.css?v=20261022-internal-tools1" />
   <link rel="stylesheet" href="admin.css?v=20260920-artelegram2" />
   <link rel="stylesheet" href="customer-invoice-routing-v1.css?v=20260920-artelegram2" />
 </head>
@@ -23,12 +23,13 @@
       <nav class="nav" aria-label="Notification Center navigation">
         <button class="nav-item active" data-page="overview">Overview</button>
         <button class="nav-item" data-page="staff">Group Topics</button>
-        <a class="nav-item" href="invoice-photo-organizer.html" style="text-decoration:none;display:block">📸 Invoice Photo Organizer ↗</a>
-          <a class="nav-item" href="bank-review-routing.html" style="text-decoration:none;display:block">🏦 Bank Personal Review Routes ↗</a>
-        <a class="nav-item" href="https://angsokhey11-cloud.github.io/big-brother-admin-work/assistant-topic-mapping.html" style="text-decoration:none;display:block">Assistant Topic Mapping ↗</a>
-  <a class="nav-item" href="https://angsokhey11-cloud.github.io/big-brother-admin-work/telegram-team-groups.html" style="text-decoration:none;display:block">Telegram Team Groups ↗</a>
-  <a class="nav-item" href="https://angsokhey11-cloud.github.io/big-brother-admin-work/bank-assistant-setup.html" style="text-decoration:none;display:block">Bank Assistant Setup ↗</a>
-  <a class="nav-item" href="https://angsokhey11-cloud.github.io/big-brother-admin-work/customer-bank-directory.html" style="text-decoration:none;display:block">Customer Bank Directory ↗</a>
+        <button class="nav-item" type="button" data-tool="invoice-photo-organizer">📸 Invoice Photo Organizer</button>
+          <button class="nav-item" type="button" data-tool="bank-review-routing">🏦 Bank Personal Review Routes</button>
+        <button class="nav-item" type="button" data-tool="assistant-topic-mapping">Assistant Topic Mapping</button>
+  <button class="nav-item" type="button" data-tool="telegram-team-groups">Telegram Team Groups</button>
+  <button class="nav-item" type="button" data-tool="bank-assistant-setup">Bank Assistant Setup</button>
+  <button class="nav-item" type="button" data-tool="customer-bank-directory">Customer Bank Directory</button>
+        <button class="nav-item" type="button" data-tool="staff-assistant-mapping">🔐 Private Staff Mapping</button>
         <button class="nav-item" data-page="customers">Customer Telegram Routing</button>
         <button class="nav-item" data-page="invoiceQueue">Invoice Queue</button>
         <button class="nav-item" data-page="arQueue">A/R Update Queue</button>
@@ -54,6 +55,20 @@
           <button id="refreshBtn" class="btn secondary">Refresh</button>
         </div>
       </header>
+
+      <!-- Linked admin functions share this workspace; original module scripts,
+           session checks and database permissions still run inside the iframe. -->
+      <section class="page" id="page-toolWorkspace" aria-label="Telegram Manager function workspace">
+        <div class="telegram-workspace-toolbar">
+          <span class="telegram-workspace-context"><span class="dot ok"></span> BIG BROTHER · Telegram Manager</span>
+          <button class="btn secondary telegram-tool-back" id="toolWorkspaceBack" type="button">← Telegram Overview</button>
+        </div>
+        <div class="telegram-workspace-frame-shell" id="toolWorkspaceShell">
+          <iframe id="toolWorkspaceFrame" title="Telegram Manager function" src="about:blank"
+            referrerpolicy="strict-origin-when-cross-origin" loading="eager"></iframe>
+        </div>
+        <div id="toolWorkspaceError" class="telegram-workspace-error" role="status" hidden></div>
+      </section>
 
       <section class="page active" id="page-overview">
         <div class="hero panel">
@@ -150,7 +165,7 @@
               <h2>🔐 Verified Private Staff Accounts</h2>
               <p>Safely link each staff member's personal Telegram User ID for private customer lookups and My Earnings. Separate from the existing group-topic mappings.</p>
             </div>
-            <a href="./staff-assistant-mapping.html" class="btn primary">Open Private Staff Mapping →</a>
+            <button type="button" data-tool="staff-assistant-mapping" class="btn primary">Open Private Staff Mapping →</button>
           </div>
         </div>
       </section>
@@ -251,7 +266,7 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="app.js?v=20260920-artelegram2"></script>
+  <script src="app.js?v=20261022-internal-tools1"></script>
   <script src="group-routing-v1.js?v=20260919-3"></script>
   <script src="customer-invoice-routing-v1.js?v=20260920-artelegram2"></script>
   <script src="customer-ar-routing-v1.js?v=20260920-artelegram2"></script>
