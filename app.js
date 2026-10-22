@@ -148,6 +148,9 @@ function toolFrameLoaded(){
     child=toolFrame.contentDocument;
     locationURL=new URL(toolFrame.contentWindow.location.href);
   }catch(_){
+    // A child tried to navigate across origins (or cannot be inspected).
+    // Fail closed: do not leave an unapproved page in the Telegram workspace.
+    toolFrame.src='about:blank';
     if(toolError){
       toolError.textContent='This page could not be embedded. Use the Telegram sidebar to open another function.';
       toolError.hidden=false;
