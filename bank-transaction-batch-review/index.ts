@@ -66,12 +66,27 @@ Deno.serve(async(req:Request)=>{
    const {data,error}=await client.from("bb_bank_new_invoice_review_drafts")
     .select("draft_id,source_message_id,sender_name,transaction_id,amount,currency,bank_channel,received_date,status,review_decision,review_payload,registered_transaction_id")
     .eq("review_batch_id",batchId).eq("reviewer_telegram_user_id",reviewerId)
-    .order("created_at").order("source_message_id").limit(100);
+    .order("source_message_id",{ascending:true}).order("created_at",{ascending:true}).order("draft_id",{ascending:true}).limit(100);
    if(error)throw error;
    return data||[];
   };
   if(action==="load"){
-   return reply({ok:true,batch:{batch_id:batch.batch_id,status:batch.status,expires_at:batch.expires_at},items:await getEntries()});
+   const entries=await getEntries();
+   // Match exact normalized staff names; do not infer a customer from a staff sender.
+   const {data:staffRows,error:staffError}=await client.from("staff").select("staff_id,staff_name,status").limit(1000);
+   if(staffError)throw staffError;
+   const norm=(v:unknown)=>text(v).normalize("NFKC").replace(/\s+/g," ").toLowerCase();
+   const staffNames=new Map<string,{staff_id:string,staff_name:string}>();
+   for(const s of staffRows||[]){
+    if(!s.staff_name||/^(inactive|resigned|terminated|left)$/i.test(text(s.status)))continue;
+    const key=norm(s.staff_name);
+    if(key&&!staffNames.has(key))staffNames.set(key,{staff_id:text(s.staff_id),staff_name:text(s.staff_name)});
+   }
+   const items=entries.map((item:any)=>{
+    const staff=staffNames.get(norm(item.sender_name));
+    return {...item,sender_is_staff:!!staff,sender_staff_name:staff?.staff_name||null};
+   });
+   return reply({ok:true,batch:{batch_id:batch.batch_id,status:batch.status,expires_at:batch.expires_at},items});
   }
   if(action==="cancel"){
     // Cancel only a pending review. The protected DB function atomically marks
@@ -88,7 +103,7 @@ Deno.serve(async(req:Request)=>{
     if(!out?.already_cancelled){
      await telegramPrivate(reviewerId,"🚫 BIG BROTHER — BANK REVIEW CANCELLED\n\n"+
       Number(out.discarded||0)+" pending bank notices discarded from review.\n"+
-      "No bank transactions were registered or removed. Existing Bank Register and payments are unchanged.\n\n"+
+      "Cancelling this manual review did not add or remove bank transactions. Any balances already auto-registered by Bank Assistant remain in Bank Register; invoice payments are unchanged.\n\n"+
       "Forward new bank notices to the mapped group/topic, then send /reviewtransaction to start a fresh review.").catch(()=>{});
     }
     return reply(out);
@@ -100,17 +115,19 @@ Deno.serve(async(req:Request)=>{
    let payload:null|Record<string,unknown>=null;
    if(decision==="new_invoice"){
     const p=body.details||{},customer=text(p.customer_id),tid=text(p.transaction_id).toUpperCase(),
-     payer=Number(p.payer_identity_id),a=Number(p.amount),cur=text(p.currency).toUpperCase(),
+     payer=p.payer_identity_id==null?null:Number(p.payer_identity_id),payerName=text(p.payer_name),a=Number(p.amount),cur=text(p.currency).toUpperCase(),
      inv=text(p.invoice_currency).toUpperCase(),rate=Number(p.exchange_rate),date=text(p.received_date);
-    if(!customer||customer.length>150||!tid||tid.length>160||!Number.isSafeInteger(payer)||payer<1||
+    if(!customer||customer.length>150||!tid||tid.length>160||(payer!==null&&(!Number.isSafeInteger(payer)||payer<1))||(payer===null&&(payerName.length<2||payerName.length>140))||
      !Number.isFinite(a)||a<=0||!["USD","KHR"].includes(cur)||!["USD","KHR"].includes(inv)||
      !Number.isFinite(rate)||rate<=0||(cur!==inv&&rate<=1)||
      !/^\d{4}-\d{2}-\d{2}$/.test(date)||date>new Date(Date.now()+7*3600000).toISOString().slice(0,10))
       return reply({error:"Verify customer, payer, transaction, currency, amount, date and exchange rate."},400);
-    const {data:payerRow}=await client.from("bb_customer_bank_identities").select("identity_id")
-     .eq("identity_id",payer).eq("customer_id",customer).eq("active",true).maybeSingle();
-    if(!payerRow)return reply({error:"Selected payer does not belong to this customer. Save or choose a bank payer first."},409);
-    payload={customer_id:customer,transaction_id:tid,payer_identity_id:payer,amount:a,currency:cur,
+    if(payer!==null){
+     const {data:payerRow}=await client.from("bb_customer_bank_identities").select("identity_id")
+      .eq("identity_id",payer).eq("customer_id",customer).eq("active",true).maybeSingle();
+     if(!payerRow)return reply({error:"Selected payer does not belong to this customer."},409);
+    }
+    payload={customer_id:customer,transaction_id:tid,payer_identity_id:payer,payer_name:payer===null?payerName:null,amount:a,currency:cur,
       invoice_currency:inv,exchange_rate:rate,received_date:date,bank_name:text(p.bank_name).slice(0,120)};
    }
    const {data:changed,error}=await client.from("bb_bank_new_invoice_review_drafts")
@@ -144,9 +161,10 @@ Deno.serve(async(req:Request)=>{
    if(!tid)return reply({error:"Missing reviewed transaction ID."},409);
    const {data:registered,error:registerError}=await client.from("bb_verified_bank_transactions")
     .select("transaction_id,customer_id,amount,currency,invoice_currency,approved_exchange_rate,payer_identity_id,created_by,status,received_date")
-    .eq("transaction_id",tid).eq("customer_id",p.customer_id).eq("payer_identity_id",p.payer_identity_id)
+    .eq("transaction_id",tid).eq("customer_id",p.customer_id)
     .eq("created_by",user.id).maybeSingle();
    if(registerError||!registered||registered.status!=="AVAILABLE"||
+      (registered.payer_identity_id??null)!==(p.payer_identity_id??null)||
       Math.abs(Number(registered.amount)-Number(p.amount))>0.00001||
       registered.currency!==p.currency||(registered.invoice_currency||registered.currency)!==p.invoice_currency||
       Math.abs(Number(registered.approved_exchange_rate)-Number(p.exchange_rate))>0.000001||
