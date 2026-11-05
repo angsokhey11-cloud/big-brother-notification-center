@@ -110,7 +110,7 @@ const khr=n=>"៛"+Number(n||0).toLocaleString("en-US",{maximumFractionDigits:2}
 const amount=(n,c)=>c==="KHR"?khr(n):usd(n);
 let auth=null,batch=null,entries=[],rows=[],customers=[],identities=[],duplicates=new Map(),
 finances={available_bank_balances:[],outstanding_receivables:[]},financeAvailable=false,busy=false,filterText="";
-const financeLoadedCustomers=new Set();let financeInFlight=false,financeAgain=false,financeTimer=null;
+const financeLoadedCustomers=new Set();let financeInFlight=false,financeAgain=false,financeTimer=null,financeLookupFailed=false;
 function view(name){for(const id of ["loading","login","workspace","complete"])el(id).classList.toggle("hide",id!==name)}
 function note(msg,failed=false){el("notice").textContent=msg;el("notice").className="banner"+(failed?" error":"");}
 function clearNote(){el("notice").className="banner hide"}
@@ -223,9 +223,8 @@ function totalsFor(customer,currency){
 function financeText(r){
  if(!r.customerId)return "Customer bank balances and A/R will display after you assign a customer.";
  if(!financeLoadedCustomers.has(r.customerId)){
-  return financeAvailable?
-   "Loading this customer's bank balances and A/R in the background…":
-   "Customer assigned. Fetching bank balances and A/R in the background…";
+  if(financeLookupFailed)return "⚠️ Live bank balance/A/R lookup is temporarily unavailable. Customer assignment is saved locally; verify balances before confirming registration.";
+  return "Loading this customer's bank balances and A/R in the background…";
  }
  const f=totalsFor(r.customerId,r.currency);
  const projected=r.currency==="USD"?
@@ -352,9 +351,9 @@ async function loadFinance(){
    ]
   };
   ids.forEach(id=>financeLoadedCustomers.add(id));
-  financeAvailable=true;
+  financeAvailable=true;financeLookupFailed=false;
  }catch(e){
-  financeAvailable=false;
+  financeAvailable=false;financeLookupFailed=true;
   console.warn("Bank review finance lookup failed",e instanceof Error?e.message:"request");
  }finally{
   financeInFlight=false;
