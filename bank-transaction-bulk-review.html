@@ -144,6 +144,14 @@ function matchesFor(sender){
  return identities.filter(x=>x.active===true&&[x.account_holder_name,...(Array.isArray(x.alternative_names)?x.alternative_names:[])].some(n=>norm(n)===target));
 }
 function customerName(id){const c=customers.find(x=>x.customer_id===id);return c?cl(c.customer_name||c.customer_id)+" · "+c.customer_id+(c.location_code?" · "+cl(c.location_code):""):cl(id);}
+function identitiesForCustomer(customerId){
+ return identities.filter(p=>p.active===true&&p.customer_id===customerId);
+}
+function selectedAliasIdentity(r){
+ const available=identitiesForCustomer(r.customerId);
+ if(available.length===1)return available[0];
+ return available.find(x=>Number(x.identity_id)===Number(r.aliasTargetId||0))||null;
+}
 function populate(){
  rows=entries.map(e=>{
   const matches=matchesFor(e.sender_name);
@@ -155,7 +163,7 @@ function populate(){
   return {
    id:e.draft_id,original:e,selected:e.review_decision==="new_invoice",
    staff,unique,exact:!staff&&unique.length===1&&matches.length===1,
-   customerId:assigned,payerId:payer,expanded:false,
+   customerId:assigned,payerId:payer,aliasTargetId:payer||0,expanded:false,
    payerName:cl(p.payer_name||e.sender_name),transactionId:cl(p.transaction_id||e.transaction_id).toUpperCase(),
    amount:p.amount??e.amount??"",currency:cl(p.currency||e.currency).toUpperCase(),
    receivedDate:cl(p.received_date||e.received_date),bankName:cl(p.bank_name||e.bank_channel),
@@ -212,6 +220,21 @@ function totalsFor(customer,currency){
  };
 }
 function rowDetails(r){
+ const identityList=identitiesForCustomer(r.customerId);
+ const aliasChoice=selectedAliasIdentity(r);
+ const aliasPicker=identityList.length>1?
+  '<div class="field" style="margin-top:11px"><label>Save as Alternative Name under which existing bank account?</label>'+
+  '<select data-action="alias-target" data-id="'+esc(r.id)+'">'+
+  '<option value="">Choose original bank payer (required)</option>'+
+  identityList.map(p=>'<option value="'+esc(p.identity_id)+'"'+
+   (Number(r.aliasTargetId||0)===Number(p.identity_id)?' selected':'')+'>'+
+   esc(p.account_holder_name)+' · '+esc(p.bank_name)+
+   (p.account_number?' · '+esc(p.account_number):'')+'</option>').join("")+'</select></div>':
+  identityList.length===1?
+   '<div class="bankstats">Original bank account holder: <strong>'+esc(identityList[0].account_holder_name)+
+   '</strong> · '+esc(identityList[0].bank_name)+
+   '<div class="sub">New name will be appended as Alternative Name. Existing holder and aliases stay unchanged.</div></div>':
+   '<div class="bankstats">This customer has no active bank payer identity. You can create their first primary payer identity, or use Register Once.</div>';
  const f=r.customerId?totalsFor(r.customerId,r.currency):null;
  const preview=r.currency==="USD"?usd((f?.usdBank||0)+(r.selected?Number(r.amount)||0:0)):
   khr((f?.khrBank||0)+(r.selected?Number(r.amount)||0:0));
@@ -239,9 +262,11 @@ function rowDetails(r){
   '<div class="field"><label>Sender / payer name</label><input type="text" maxlength="140" data-id="'+esc(r.id)+'" data-field="payerName" value="'+esc(r.payerName)+'"></div>'+
   '</div>'+
   '<div class="sub" style="margin:12px 0 7px">Payer directory: '+(r.payerId?'Existing saved bank payer (ID '+esc(r.payerId)+')':'One-time registration (do not remember sender)')+'</div>'+
+  aliasPicker+
   '<div class="actions">'+
   (r.payerId?'<button class="secondary smallbtn" data-action="once" data-id="'+esc(r.id)+'">Use Once Instead</button>':'')+
-  '<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">Save Payer to Directory</button>'+
+  (!r.staff?'<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">'+
+    (identityList.length?'Add Alternative Name':'Create First Bank Payer')+'</button>':'')+
   '</div>'+
   '<div class="bankstats" style="white-space:pre-line">'+esc(finance)+'</div>'+
   '</div>';
@@ -301,23 +326,57 @@ function showCustomerMatches(input){
 }
 async function rememberPayer(r){
  if(!r.customerId){note("Choose the beneficiary customer first.",true);return;}
- if(r.staff&&!confirm("This appears to be a COMPANY STAFF sender. Saving their name permanently to one customer's bank directory may misassign future deposits. Continue only if this account truly belongs to this customer."))return;
+ if(r.staff){note("Company staff deposits must use Register Once. Do not save the salesman's name in a customer's permanent bank directory.",true);return;}
  if(!r.payerName||r.payerName.length<2){note("Enter the sender name first.",true);return;}
- if(!confirm("SAVE PERMANENT BANK PAYER?\n\n"+r.payerName+"\n→ "+customerName(r.customerId)+"\n\nThis directory entry affects future matching. For a salesman's deposit, select Use Once instead."))return;
- const bank=cl(r.bankName)||prompt("Enter the receiving bank name for the directory entry:");
- if(!bank||bank.length<2){note("Bank name required to save the directory entry.",true);return;}
- setBusy(true,"Saving payer to Customer Bank Directory…");
+ const current=identitiesForCustomer(r.customerId);
+ const existing=current.length?selectedAliasIdentity(r):null;
+ if(current.length&&!existing){
+  note("This customer has multiple bank identities. Choose the correct original account holder before adding an alternative name.",true);
+  r.expanded=true;renderRow(r);return;
+ }
+ if(current.length){
+  const name=cl(existing.account_holder_name),bank=cl(existing.bank_name);
+  if(!confirm("ADD AN ALTERNATIVE PAYER NAME?\n\nCustomer: "+customerName(r.customerId)+
+   "\nOriginal account holder: "+name+"\nBank: "+bank+
+   "\nNew alternative name: "+r.payerName+
+   "\n\nThe original holder and existing alternative names will remain unchanged. Do not save salesmen or third parties who pay for multiple customers."))return;
+  setBusy(true,"Appending Alternative Name without changing the original holder…");
+  try{
+   const result=await rpc("bb_customer_bank_identity_add_alias_v1",{
+    p_customer_id:r.customerId,p_identity_id:Number(existing.identity_id),
+    p_alias_name:r.payerName
+   });
+   if(!result?.identity_id||result.original_holder_unchanged!==true)
+    throw Error("The bank directory did not confirm the original account holder was preserved.");
+   existing.alternative_names=Array.isArray(result.alternative_names)?result.alternative_names:existing.alternative_names||[];
+   r.payerId=Number(result.identity_id);r.aliasTargetId=r.payerId;
+   r.exact=true;
+   note(result.new_alias_added
+    ?"Alternative Name saved under "+name+". Original account holder and previous aliases are preserved. No bank balance has been registered."
+    :"That payer name was already listed on "+name+". The original record is unchanged.");
+  }catch(e){note("Could not add Alternative Name: "+e.message,true)}
+  finally{setBusy(false);renderRow(r)}
+  return;
+ }
+ // A customer without any bank identity can explicitly create their first primary payer.
+ if(!confirm("CREATE FIRST BANK PAYER IDENTITY?\n\nCustomer: "+customerName(r.customerId)+
+  "\nNew primary holder: "+r.payerName+
+  "\n\nThis customer has no active bank payer directory entry. Continue only if this is their own bank payer identity. Use Register Once for staff or third-party deposits."))return;
+ const bank=cl(r.bankName)||prompt("Enter the bank name for the first payer identity:");
+ if(!bank||bank.length<2){note("Bank name required to create the first payer identity.",true);return;}
+ setBusy(true,"Creating the customer's first bank payer identity…");
  try{
   const id=await rpc("bb_customer_bank_identity_save",{
    p_customer_id:r.customerId,p_bank_name:bank,p_holder_name:r.payerName,
    p_account_number:null,p_alternative_names:[],p_identity_id:null
   });
   if(!id||!Number(id))throw Error("Directory did not confirm the new payer identity.");
-  identities=await rpc("bb_customer_bank_identity_list");
-  r.payerId=Number(id);r.bankName=bank;
-  note("Payer saved to the selected customer's bank directory. The transfer itself is NOT registered yet.");
- }catch(e){note("Directory save failed: "+e.message,true)}
- finally{setBusy(false);render()}
+  identities.push({identity_id:Number(id),customer_id:r.customerId,bank_name:bank,
+   account_holder_name:r.payerName,account_number:null,alternative_names:[],active:true});
+  r.payerId=Number(id);r.aliasTargetId=r.payerId;r.bankName=bank;r.exact=true;
+  note("First bank payer identity created for this customer. The transfer is not registered yet.");
+ }catch(e){note("Bank directory save failed: "+e.message,true)}
+ finally{setBusy(false);renderRow(r)}
 }
 function setBusy(state,msg){
  busy=state;
@@ -466,9 +525,9 @@ el("rows").addEventListener("click",async e=>{
  if(action==="pick"){
   const id=cl(target.dataset.customer);
   if(!customers.some(c=>c.customer_id===id))return;
-  row.customerId=id;row.payerId=0;
+  row.customerId=id;row.payerId=0;row.aliasTargetId=0;
   const exact=matchesFor(row.payerName).filter(x=>x.customer_id===id);
-  if(exact.length===1&&!row.staff)row.payerId=Number(exact[0].identity_id);
+  if(exact.length===1&&!row.staff){row.payerId=Number(exact[0].identity_id);row.aliasTargetId=row.payerId;}
   clearNote();render();await loadFinance();return;
  }
  if(action==="once"){row.payerId=0;render();return;}
@@ -480,6 +539,9 @@ el("rows").addEventListener("input",e=>{
 el("rows").addEventListener("change",e=>{
  const id=e.target.dataset.id,row=findRow(id);if(!row||busy||batch.status!=="reviewing")return;
  if(e.target.dataset.action==="check"){row.selected=e.target.checked;clearNote();render();return;}
+ if(e.target.dataset.action==="alias-target"){
+  row.aliasTargetId=Number(e.target.value||0);clearNote();renderRow(row);return;
+ }
  const field=e.target.dataset.field;
  if(field&&Object.prototype.hasOwnProperty.call(row,field)){
   row[field]=e.target.value;
