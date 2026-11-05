@@ -83,7 +83,8 @@ Deno.serve(async(req:Request)=>{
     }
     return result||{cleaned:false};
   };
-  if(action==="load"){
+  if(action==="load"||action==="load_bulk"){
+   if(action==="load_bulk"&&!batch.review_session_id)return reply({error:"Bulk review is only for explicitly started bank collection sessions. Open legacy batches using the original review."},409);
    const entries=await getEntries();
    // Match exact normalized staff names; do not infer a customer from a staff sender.
    const {data:staffRows,error:staffError}=await client.from("staff").select("staff_id,staff_name,status").limit(1000);
@@ -99,7 +100,39 @@ Deno.serve(async(req:Request)=>{
     const staff=staffNames.get(norm(item.sender_name));
     return {...item,sender_is_staff:!!staff,sender_staff_name:staff?.staff_name||null};
    });
-   return reply({ok:true,batch:{batch_id:batch.batch_id,status:batch.status,expires_at:batch.expires_at},items});
+   let analysis:any=null;
+   if(action==="load_bulk"){
+    const ids=[...new Set(entries.map((e:any)=>text(e.transaction_id).toUpperCase()).filter(Boolean))];
+    const {data:inspected,error:inspectError}=await client.rpc("bb_bank_review_inspect_v2",{
+      p_transaction_ids:ids,p_customer_ids:[]
+    });
+    if(inspectError)throw inspectError;
+    analysis=inspected;
+   }
+   return reply({ok:true,batch:{batch_id:batch.batch_id,status:batch.status,
+     expires_at:batch.expires_at,review_session_id:batch.review_session_id||null},items,analysis});
+  }
+  if(action==="bulk_inspect"){
+   if(!batch.review_session_id)return reply({error:"Not an explicit-session bulk review"},409);
+   const ids=Array.isArray(body.customer_ids)?[...new Set(body.customer_ids.map((x:any)=>text(x)).filter(Boolean))]:[];
+   const refs=Array.isArray(body.transaction_ids)?[...new Set(body.transaction_ids.map((x:any)=>text(x).toUpperCase()).filter(Boolean))]:[];
+   if(ids.length>100||refs.length>100)return reply({error:"Bank review analysis request too large"},400);
+   const {data,error}=await client.rpc("bb_bank_review_inspect_v2",{
+     p_transaction_ids:refs,p_customer_ids:ids
+   });
+   if(error)return reply({error:"Bank balance analysis unavailable"},503);
+   return reply({ok:true,analysis:data});
+  }
+  if(action==="bulk_prepare"){
+   if(!batch.review_session_id)return reply({error:"Only explicitly started sessions support bulk review"},409);
+   if(batch.status!=="reviewing")return reply({error:"Review choices are locked after final confirmation begins"},409);
+   const choices=Array.isArray(body.choices)?body.choices:[];
+   if(!choices.length||choices.length>100)return reply({error:"Invalid bulk selection"},400);
+   const {data,error}=await client.rpc("bb_bank_review_bulk_prepare_v2",{
+     p_batch_id:batchId,p_reviewer:reviewerId,p_admin_user:user.id,p_choices:choices
+   });
+   if(error)return reply({error:error.message||"Bulk preparation failed. No bank balances were created."},409);
+   return reply(data||{error:"Bulk review preparation failed"},data?.ok?200:409);
   }
   if(action==="cancel"){
     // Cancel only a pending review. The protected DB function atomically marks
