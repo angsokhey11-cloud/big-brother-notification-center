@@ -384,7 +384,9 @@ async function bankCollectCallback(cb:any):Promise<boolean>{
   await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Only this session's authorized reviewer can control it.",show_alert:true});return true;
  }
  if(m[1]==="more"){
-  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Okay! Continue forwarding transactions."});return true;
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,
+   text:s.status==="collecting"?"Okay! Continue forwarding transactions.":"This collection is closed for review.",
+   show_alert:s.status!=="collecting"});return true;
  }
  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Preparing your review..."});
  await beginBankTransactionReview({...cb.message,from:cb.from,message_thread_id:Number(s.source_thread_id||0)},null,m[2]);
