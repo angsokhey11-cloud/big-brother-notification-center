@@ -293,7 +293,8 @@ async function stashBankNotice(m:any){
    sender_name:parsed?.sender||null,transaction_id:parsed?.transactionId||null,
    amount:parsed?.amount!=null&&Number.isFinite(parsed.amount)&&parsed.amount>0?parsed.amount:null,
    currency:parsed?.currency||null,bank_channel:parsed?.channel||null,
-   received_date:parsed?.receivedDate||null
+   received_date:parsed?.receivedDate||null,
+   expires_at:new Date(Date.now()+7*24*3600000).toISOString()
  },{onConflict:"source_chat_id,source_thread_id,source_message_id",ignoreDuplicates:true});
  if(error)throw error;
 }
@@ -344,8 +345,8 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
    .order("created_at",{ascending:true}).order("source_message_id",{ascending:true})
    .limit(100);
  if(listError)throw listError;
- let registered=0,duplicate=0,held=0,errors=0;
- const items:string[]=[];
+ let registered=0,duplicate=0,held=0,errors=0,totalUsd=0,totalKhr=0;
+ const items:string[]=[],duplicates:string[]=[];
  for(const x of candidates||[]){
    const {data:r,error}=await client.rpc("bb_bank_assistant_auto_register_v1",{
      p_draft_id:x.draft_id,p_chat:sourceChat,p_thread:sourceThread,
@@ -354,11 +355,15 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
    if(error){errors++;held++;console.warn("Bank notice held for manual review",error.code||"db");continue;}
    if(r?.outcome==="registered"){
      registered++;
+     if(r.currency==="USD")totalUsd+=Number(r.amount)||0;
+     if(r.currency==="KHR")totalKhr+=Number(r.amount)||0;
      if(items.length<12)items.push("• "+escape(r.customer_id)+" · "+escape(r.currency)+" "+
        escape(Number(r.amount).toLocaleString("en-US",{maximumFractionDigits:2}))+
        " · <code>"+escape(r.transaction_id)+"</code>");
-   }else if(r?.outcome==="duplicate")duplicate++;
-   else if(r?.outcome==="review")held++;
+   }else if(r?.outcome==="duplicate"){
+     duplicate++;
+     if(duplicates.length<12)duplicates.push("<code>"+escape(r.transaction_id)+"</code>");
+   }else if(r?.outcome==="review")held++;
  }
  const {count:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
    .select("draft_id",{count:"exact",head:true}).eq("source_chat_id",sourceChat)
@@ -372,11 +377,14 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
  const outstanding=Number(pending||0),pendingQueue=Number(queuePending||0);
  const summary="🏦 <b>BIG BROTHER — Bank Assistant Summary</b>\n\n"+
    "✅ Auto-registered customer bank balances: <b>"+registered+"</b>\n"+
+   "💵 Credited USD: <b>$"+totalUsd.toFixed(2)+"</b>\n"+
+   "៛ Credited KHR: <b>៛"+totalKhr.toLocaleString("en-US")+"</b>\n"+
    "⏭ Already registered / duplicate IDs skipped: <b>"+duplicate+"</b>\n"+
    "🔎 Exceptions needing your review: <b>"+outstanding+"</b>\n"+
    (errors?"⚠️ Server checks held "+errors+" item(s) for review.\n":"")+
    (pendingQueue?"⚠️ "+pendingQueue+" source notice(s) still in queue. Run /reviewtransaction again.\n":"")+
    (items.length?"\n<b>Registered transactions</b>\n"+items.join("\n")+"\n":"")+
+   (duplicates.length?"\n<b>Skipped duplicate references</b>\n"+duplicates.join(", ")+"\n":"")+
    "\n<i>Only available customer bank balances were created. No A/R clearing, invoice payment, or FX conversion.</i>";
  const {data,error}=await client.rpc("bb_bank_start_transaction_review",{
    p_reviewer:reviewer,p_chat:privateChat?null:sourceChat,
