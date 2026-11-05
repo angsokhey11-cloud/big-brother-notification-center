@@ -1045,7 +1045,7 @@ async function drainTopicQueue(chat:string,thread:number):Promise<boolean>{
    const {data:rows,error:loadError}=await client.from("bb_bank_assistant_queue")
      .select("queue_id,payload").eq("telegram_chat_id",chat)
      .eq("telegram_thread_id",thread).lt("attempts",3)
-     .order("queue_id",{ascending:true}).limit(250);
+     .order("queue_id",{ascending:true}).limit(100);
    if(loadError)throw loadError;
    if(!rows?.length)return true;
    const drafts:any[]=[];
