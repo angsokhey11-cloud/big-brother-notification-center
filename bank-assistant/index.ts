@@ -337,9 +337,13 @@ async function updateBankCollectPrompt(m:any,id:string,r:any){
  try{
   const sent=await tg("sendMessage",body);
   if(sent?.ok&&sent.result?.message_id){
-   await db().from("bb_bank_review_sessions")
+   let update=db().from("bb_bank_review_sessions")
     .update({prompt_message_id:Number(sent.result.message_id)})
-    .eq("session_id",id).eq("status","collecting").is("prompt_message_id",null);
+    .eq("session_id",id).eq("status","collecting");
+   // Replace a stale prompt only if nobody else has updated it.
+   update=previous>0?update.eq("prompt_message_id",previous):update.is("prompt_message_id",null);
+   const {error}=await update;
+   if(error)console.warn("Bank status prompt pointer not saved",error.code||"db");
   }
  }catch(e){console.warn("Bank collection prompt unavailable",e instanceof Error?e.name:"error");}
 }
