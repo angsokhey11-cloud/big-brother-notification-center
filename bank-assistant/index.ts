@@ -282,25 +282,22 @@ async function newInvoiceRegisterClick(cb:any,_scope:RouteScope){
  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Send /reviewtransaction in your Bank Assistant topic to get a private review batch.",show_alert:true});
  return true;
 }
-// Silent bank intake: retain source Telegram message for on-demand batch processing.
-async function stashBankNotice(m:any){
- const t=val(m.text||m.caption);
- const parsed=t?parseNotice(t):null;
- const refOnly=t.match(/^(?:លេខយោង\s*[:：]?\s*|Trx\.?\s*ID\s*[:：]?\s*)?([0-9]{5,20})$/iu);
- const transactionId=parsed?.transactionId||refOnly?.[1]||null;
- const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),msgId=Number(m.message_id||0);
- if(!chat||!Number.isSafeInteger(msgId)||msgId<1)return;
- const {error}=await db().from("bb_bank_new_invoice_review_drafts").upsert({
-   source_chat_id:chat,source_thread_id:thread,source_message_id:msgId,
-   sender_name:parsed?.sender||null,transaction_id:transactionId,
+// Silent bank intake: parse fields locally; do not query customers or send replies.
+function bankDraftRow(m:any){
+ const raw=val(m.text||m.caption),parsed=raw?parseNotice(raw):null;
+ const onlyId=raw.match(/^(?:លេខយោង\s*[:：]?\s*|Trx\.?\s*ID\s*[:：]?\s*)?([0-9]{5,20})$/iu);
+ const id=parsed?.transactionId||onlyId?.[1]||null;
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),mid=Number(m.message_id||0);
+ if(!chat||!Number.isSafeInteger(mid)||mid<1)return null;
+ return {
+   source_chat_id:chat,source_thread_id:thread,source_message_id:mid,
+   sender_name:parsed?.sender||null,transaction_id:id,
    amount:parsed?.amount!=null&&Number.isFinite(parsed.amount)&&parsed.amount>0?parsed.amount:null,
    currency:parsed?.currency||null,bank_channel:parsed?.channel||null,
    received_date:parsed?.receivedDate||null,
    expires_at:new Date(Date.now()+7*24*3600000).toISOString()
- },{onConflict:"source_chat_id,source_thread_id,source_message_id",ignoreDuplicates:true});
- if(error)throw error;
+ };
 }
-
 // Explicit trigger only: one private reviewer is assigned to every mapped group/topic.
 async function beginBankTransactionReview(m:any,scope:RouteScope|null){
  const commandUser=val(m.from?.id),privateChat=val(m.chat?.type)==="private"&&val(m.chat?.id)===commandUser;
@@ -1034,7 +1031,7 @@ async function enqueueNotice(updateId:number,m:any){
 }
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function drainTopicQueue(chat:string,thread:number):Promise<boolean>{
- const owner=crypto.randomUUID(),client=db();
+ const client=db(),owner=crypto.randomUUID();
  let acquired=false;
  for(let attempt=0;attempt<90;attempt++){
    const {data,error}=await client.rpc("bb_bank_assistant_try_lock",{
@@ -1046,36 +1043,34 @@ async function drainTopicQueue(chat:string,thread:number):Promise<boolean>{
  }
  if(!acquired)return false;
  try{
-   // Parse without Telegram replies; no customer matching occurs on forward.
-   for(let processed=0;processed<150;processed++){
-     const {data:row,error}=await client.from("bb_bank_assistant_queue")
-       .select("queue_id,payload,attempts").eq("telegram_chat_id",chat)
-       .eq("telegram_thread_id",thread).lt("attempts",3)
-       .order("queue_id",{ascending:true}).limit(1).maybeSingle();
-     if(error)throw error;
-     if(!row)break;
-     try{
-       const scope=await bankScope(row.payload);
-       if(scope&&await scopeAllows(row.payload,scope))await stashBankNotice(row.payload);
-       const {error:deleteError}=await client.from("bb_bank_assistant_queue")
-         .delete().eq("queue_id",row.queue_id);
-       if(deleteError)throw deleteError;
-     }catch(error){
-       const attempts=Number(row.attempts||0)+1;
-       const message=error instanceof Error?error.message:"Unknown queue processing failure";
-       const {error:saveError}=await client.from("bb_bank_assistant_queue")
-         .update({attempts,last_error:message.slice(0,500)}).eq("queue_id",row.queue_id);
-       if(saveError)throw saveError;
-       console.warn("Bank notice preserved for recovery",message.slice(0,120));
-       if(attempts>=3)break;
-     }
-     await client.rpc("bb_bank_assistant_try_lock",{
-       p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45
-     });
+   // One bulk intake pass. No DB lookup or Telegram reply per forwarded notice.
+   const {data:rows,error:loadError}=await client.from("bb_bank_assistant_queue")
+     .select("queue_id,payload").eq("telegram_chat_id",chat)
+     .eq("telegram_thread_id",thread).lt("attempts",3)
+     .order("queue_id",{ascending:true}).limit(250);
+   if(loadError)throw loadError;
+   if(!rows?.length)return true;
+   const drafts:any[]=[];
+   for(const entry of rows){
+     const m=entry.payload;
+     if(val(m?.chat?.id)!==chat||Number(m?.message_thread_id||0)!==thread)continue;
+     const row=bankDraftRow(m);
+     if(row)drafts.push(row);
    }
+   if(drafts.length){
+     const {error:insertError}=await client.from("bb_bank_new_invoice_review_drafts")
+       .upsert(drafts,{onConflict:"source_chat_id,source_thread_id,source_message_id",
+         ignoreDuplicates:true});
+     if(insertError)throw insertError;
+   }
+   const {error:removeError}=await client.from("bb_bank_assistant_queue")
+     .delete().in("queue_id",rows.map((r:any)=>r.queue_id));
+   if(removeError)throw removeError;
    return true;
  }finally{
-   await client.rpc("bb_bank_assistant_unlock",{p_chat:chat,p_thread:thread,p_owner:owner}).catch(()=>{});
+   await client.rpc("bb_bank_assistant_unlock",{
+     p_chat:chat,p_thread:thread,p_owner:owner
+   }).catch(()=>{});
  }
 }
 // V3 private Staff Assistant handoff: do not persist incoming updates.
@@ -1134,10 +1129,8 @@ Deno.serve(async(req:Request)=>{
     if(scope){
       if(await scopeAllows(m,scope)){
         if(queueableNotice(m)){
+          // Silent enqueuing; only /reviewtransaction invokes the batch processor.
           await enqueueNotice(Number(u.update_id||0),m);
-          const task=drainTopicQueue(val(m.chat.id),Number(m.message_thread_id||0));
-          try{(globalThis as any).EdgeRuntime?.waitUntil?.(task);}catch(_){}
-          if(!(globalThis as any).EdgeRuntime?.waitUntil)await task;
         }else{
           await handle(m,scope);
         }
