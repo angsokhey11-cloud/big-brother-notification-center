@@ -333,37 +333,35 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
    }
    reviewer=val(route.reviewer_telegram_user_id);
  }
- if(!(await drainTopicQueue(sourceChat,sourceThread))){
-   await reply(m,"⚠️ Bank queue busy. Re-send /reviewtransaction after the queue unlocks. Nothing was registered by this attempt.");
+ try{
+   if(!(await drainTopicQueue(sourceChat,sourceThread))){
+     await reply(m,"⚠️ Bank queue is busy. Retry /reviewtransaction when it unlocks.");
+     return;
+   }
+ }catch(e){
+   console.warn("Bank queue intake held",e instanceof Error?e.name:"error");
+   await reply(m,"⚠️ Could not stage the queued bank messages safely. No auto-registration was run; try /reviewtransaction again.");
    return;
  }
- const {data:candidates,error:listError}=await client.from("bb_bank_new_invoice_review_drafts")
-   .select("draft_id").eq("source_chat_id",sourceChat).eq("source_thread_id",sourceThread)
-   .eq("status","candidate").is("review_batch_id",null)
-   .gt("expires_at",new Date().toISOString())
-   .order("created_at",{ascending:true}).order("source_message_id",{ascending:true})
-   .limit(100);
- if(listError)throw listError;
- let registered=0,duplicate=0,held=0,errors=0,totalUsd=0,totalKhr=0;
- const items:string[]=[],duplicates:string[]=[];
- for(const x of candidates||[]){
-   const {data:r,error}=await client.rpc("bb_bank_assistant_auto_register_v1",{
-     p_draft_id:x.draft_id,p_chat:sourceChat,p_thread:sourceThread,
-     p_reviewer:reviewer,p_command_user:commandUser
-   });
-   if(error){errors++;held++;console.warn("Bank notice held for manual review",error.code||"db");continue;}
-   if(r?.outcome==="registered"){
-     registered++;
-     if(r.currency==="USD")totalUsd+=Number(r.amount)||0;
-     if(r.currency==="KHR")totalKhr+=Number(r.amount)||0;
-     if(items.length<12)items.push("• "+escape(r.customer_id)+" · "+escape(r.currency)+" "+
-       escape(Number(r.amount).toLocaleString("en-US",{maximumFractionDigits:2}))+
-       " · <code>"+escape(r.transaction_id)+"</code>");
-   }else if(r?.outcome==="duplicate"){
-     duplicate++;
-     if(duplicates.length<12)duplicates.push("<code>"+escape(r.transaction_id)+"</code>");
-   }else if(r?.outcome==="review")held++;
+ // All protected per-draft database checks happen in one server round-trip.
+ const {data:auto,error:autoError}=await client.rpc("bb_bank_assistant_auto_process_batch_v1",{
+   p_chat:sourceChat,p_thread:sourceThread,
+   p_reviewer:reviewer,p_command_user:commandUser,p_limit:100
+ });
+ if(autoError){
+   await reply(m,"⚠️ Automatic registration is unavailable: "+escape(val(autoError.message).slice(0,160))+
+     "\nAll notices remain pending, with no unsafe bank registration.");
+   return;
  }
+ const registered=Number(auto?.registered||0),duplicate=Number(auto?.duplicate||0),
+       errors=Number(auto?.errors||0),totalUsd=Number(auto?.usd||0),totalKhr=Number(auto?.khr||0);
+ const items=(Array.isArray(auto?.rows)?auto.rows:[]).slice(0,12).map((r:any)=>
+   "• "+escape(val(r.customer_id))+" · "+escape(val(r.currency))+" "+
+   escape(Number(r.amount).toLocaleString("en-US",{maximumFractionDigits:2}))+
+   " · <code>"+escape(val(r.transaction_id))+"</code>");
+ const duplicates=(Array.isArray(auto?.duplicate_ids)?auto.duplicate_ids:[]).slice(0,12)
+   .map((id:any)=>"<code>"+escape(val(id))+"</code>");
+
  const {count:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
    .select("draft_id",{count:"exact",head:true}).eq("source_chat_id",sourceChat)
    .eq("source_thread_id",sourceThread).eq("status","candidate").is("review_batch_id",null)
