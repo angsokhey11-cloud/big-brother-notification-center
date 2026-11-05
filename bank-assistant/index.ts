@@ -286,11 +286,13 @@ async function newInvoiceRegisterClick(cb:any,_scope:RouteScope){
 async function stashBankNotice(m:any){
  const t=val(m.text||m.caption);
  const parsed=t?parseNotice(t):null;
+ const refOnly=t.match(/^(?:លេខយោង\s*[:：]?\s*|Trx\.?\s*ID\s*[:：]?\s*)?([0-9]{5,20})$/iu);
+ const transactionId=parsed?.transactionId||refOnly?.[1]||null;
  const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),msgId=Number(m.message_id||0);
  if(!chat||!Number.isSafeInteger(msgId)||msgId<1)return;
  const {error}=await db().from("bb_bank_new_invoice_review_drafts").upsert({
    source_chat_id:chat,source_thread_id:thread,source_message_id:msgId,
-   sender_name:parsed?.sender||null,transaction_id:parsed?.transactionId||null,
+   sender_name:parsed?.sender||null,transaction_id:transactionId,
    amount:parsed?.amount!=null&&Number.isFinite(parsed.amount)&&parsed.amount>0?parsed.amount:null,
    currency:parsed?.currency||null,bank_channel:parsed?.channel||null,
    received_date:parsed?.receivedDate||null,
