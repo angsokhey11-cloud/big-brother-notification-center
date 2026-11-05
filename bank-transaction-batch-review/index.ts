@@ -70,6 +70,19 @@ Deno.serve(async(req:Request)=>{
    if(error)throw error;
    return data||[];
   };
+  const clearSessionTemporaryData=async()=>{
+    // Only explicit-session temporary notices and review batches are deleted.
+    // Bank Register, payments, A/R and audit history are never affected.
+    if(!batch.review_session_id)return {cleaned:false,legacy:true};
+    const {data:result,error:clearError}=await client.rpc("bb_bank_session_cleanup_v1",{
+      p_batch_id:batchId,p_reviewer:reviewerId
+    });
+    if(clearError){
+      console.warn("Bank temporary cleanup failed",clearError.code||"rpc");
+      return {cleaned:false,warning:true};
+    }
+    return result||{cleaned:false};
+  };
   if(action==="load"){
    const entries=await getEntries();
    // Match exact normalized staff names; do not infer a customer from a staff sender.
@@ -104,9 +117,10 @@ Deno.serve(async(req:Request)=>{
      await telegramPrivate(reviewerId,"🚫 BIG BROTHER — BANK REVIEW CANCELLED\n\n"+
       Number(out.discarded||0)+" pending bank notices discarded from review.\n"+
       "Cancelling this manual review did not add or remove bank transactions. Any balances already auto-registered by Bank Assistant remain in Bank Register; invoice payments are unchanged.\n\n"+
-      "Forward new bank notices to the mapped group/topic, then send /reviewtransaction to start a fresh review.").catch(()=>{});
+      "Send /starttransactionsreview in the mapped Bank Assistant topic to begin a new isolated collection.").catch(()=>{});
     }
-    return reply(out);
+    const cleanup=await clearSessionTemporaryData();
+    return reply({...out,temporary_cleanup:cleanup});
    }
    if(action==="save"){
    if(batch.status!=="reviewing")return reply({error:"Review choices are locked after final approval begins."},409);
@@ -195,7 +209,9 @@ Deno.serve(async(req:Request)=>{
    await telegramPrivate(reviewerId,"✅ BIG BROTHER — BANK REVIEW COMPLETED\n\nReviewed: "+entries.length+
     "\nNew Invoice Bank Register: "+approved+"\nLeft alone (A/R/other): "+(entries.length-approved)+
     "\n\nRegistered items are AVAILABLE for Invoice Generator. No A/R collection or invoice payment was created.").catch(()=>{});
-   return reply({ok:true,completed:true,total:entries.length,registered:approved,ignored:entries.length-approved});
+   const cleanup=await clearSessionTemporaryData();
+   return reply({ok:true,completed:true,total:entries.length,registered:approved,ignored:entries.length-approved,
+     temporary_cleanup:cleanup});
   }
   return reply({error:"Unsupported batch review action."},400);
  }catch(e){
