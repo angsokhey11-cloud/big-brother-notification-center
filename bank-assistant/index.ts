@@ -52,6 +52,7 @@ async function ensureTelegramCommands(){
    {command:"checktxn",description:"Check bank transaction ID (Admin only)"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
     {command:"starttransactionsreview",description:"Begin bank review collection"},
+    {command:"replytransaction",description:"Analyze replied bank notice (read-only)"},
     {command:"reviewtransaction",description:"Review active collection"},
    {command:"resumetransaction",description:"Open pending manual bank review"},
    {command:"myid",description:"Show your Telegram user ID"},
@@ -430,7 +431,7 @@ async function beginBankTransactionReview(m:any,_scope:RouteScope|null,sessionId
   await reply(m,"⚠️ Review saved, but the private link could not be delivered. Ask the mapped reviewer to open the bot, then retry /reviewtransaction.");
  }
 }
-async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
+async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope,captureDraft=true){
  const client=db();
  if(!notice.sender)return reply(m,"🔎 <b>មិនអាចកំណត់អតិថិជនបាន</b>"+noticeDetails(notice)+"\nមិនមានឈ្មោះអ្នកផ្ទេរដែលអាចសម្គាល់បាន។");
 
@@ -438,7 +439,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  if(identityError)throw identityError;
  const ids=(identityRows||[]).map((x:any)=>x.customer_id).filter(Boolean).slice(0,8);
 
- if(!ids.length)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.\n\n🏦 For a NEW Invoice Generator invoice, an admin can review and register this transfer privately.",await newInvoiceRegisterPrompt(m,notice));
+ if(!ids.length)return reply(m,"🔎 <b>អានប្រតិបត្តិការបានហើយ ប៉ុន្តែមិនទាន់ស្គាល់អតិថិជន</b>"+noticeDetails(notice)+"\n\nមិនទាន់មានឈ្មោះអ្នកផ្ទេរនេះក្នុងបញ្ជីអតិថិជនទេ។ សូមពិនិត្យឈ្មោះ រួចបន្ថែមដោយប្រើ៖\n<code>/bankadd CUSTOMER_ID | SENDER NAME</code>.\n\n🏦 For a NEW Invoice Generator invoice, an admin can review and register this transfer privately.",captureDraft?await newInvoiceRegisterPrompt(m,notice):{});
 
  let peopleQuery=client.from("customers").select("customer_id,customer_name").in("customer_id",ids);
  if(scope.location_code)peopleQuery=peopleQuery.eq("location_code",scope.location_code);
@@ -469,7 +470,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  if(invoicesResult.error)throw invoicesResult.error;
 
  const people=(peopleResult.data||[]) as Customer[];
- if(!people.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។",await newInvoiceRegisterPrompt(m,notice));
+ if(!people.length)return reply(m,"🔎 មិនមានអតិថិជនត្រូវនឹងឈ្មោះនេះនៅក្នុងទីតាំងដែលបានអនុញ្ញាតទេ។",captureDraft?await newInvoiceRegisterPrompt(m,notice):{});
 
  const invoiceRows=(invoicesResult.data||[]) as (Invoice&{customer_id:string,invoice_date?:string})[];
  const invoiceByCustomer=new Map<string,Invoice[]>();
@@ -505,7 +506,7 @@ async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteSco
  }
 
  head+="\n\n<i>នេះគ្រាន់តែជាការសម្គាល់ និងការណែនាំប៉ុណ្ណោះ។ គ្មានការកែប្រែការទូទាត់ ឬវិក្កយបត្រឡើយ។</i>";
- return reply(m,head+"\n\n🏦 New Invoice registration is admin-review-only. Do not use it for A/R or unrelated payments.",await newInvoiceRegisterPrompt(m,notice));
+ return reply(m,head+"\n\n🏦 New Invoice registration is admin-review-only. Do not use it for A/R or unrelated payments.",captureDraft?await newInvoiceRegisterPrompt(m,notice):{});
 }
 function whoIsName(text:string){
  const t=val(text).replace(/[?？!។.]+\s*$/u,"").trim();
@@ -646,6 +647,14 @@ async function resumeTransactionReplies(m:any){
 }
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
+ if(/^\/replytransaction(?:@\w+)?$/i.test(t)){
+  if(!await allowed(m.from?.id))return reply(m,"🔒 Only authorized admins may analyze bank transaction details.");
+  const original=m.reply_to_message;
+  if(!original)return reply(m,"🔎 Reply to an existing forwarded bank notification with <code>/replytransaction</code>. This is read-only.");
+  const txt=val(original.text||original.caption);
+  if(!txt)return reply(m,"⚠️ This message has no readable bank text. Image OCR is not enabled here.");
+  return report(m,parseNotice(txt),scope,false);
+ }
  if(/^\/starttransactionsreview(?:@\w+)?$/i.test(t))return startBankCollection(m);
  if(/^\/resumetransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
@@ -1030,7 +1039,7 @@ function queueableNotice(m:any){
  if(/^\/(?:reviewtransaction|resumetransaction)(?:@\w+)?$/i.test(t))return false;
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
  // Forwarded bank notices are silently staged until the administrator requests batch review.
- if(m?.forward_origin||m?.forward_date)return true;
+ if(m?.forward_origin||m?.forward_date||Array.isArray(m?.photo)&&m.photo.length>0||m?.document)return true;
  if(!t)return false;
  return /(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|paid\s+by|Trx\.?\s*ID|បានទទួល)/i.test(t);
 }
