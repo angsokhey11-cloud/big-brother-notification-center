@@ -1162,14 +1162,9 @@ Deno.serve(async(req:Request)=>{
   try{await ensureTelegramCommands();}catch(e){console.warn("Telegram command menu setup failed",e instanceof Error?e.message:"error");}
   const u=await req.json(),m=u.message;
   if(u?.bb_queue_recovery===true){
-   const {data,error}=await db().from("bb_bank_assistant_queue").select("telegram_chat_id,telegram_thread_id").order("queue_id",{ascending:true}).limit(500);
-   if(error)throw error;
-   const topics=new Map();
-   for(const row of data||[])topics.set(val(row.telegram_chat_id)+":"+Number(row.telegram_thread_id||0),row);
-   const task=Promise.all([...topics.values()].map(row=>drainTopicQueue(val(row.telegram_chat_id),Number(row.telegram_thread_id||0))));
-   if((globalThis as any).EdgeRuntime?.waitUntil)(globalThis as any).EdgeRuntime.waitUntil(task);
-   else await task;
-   return Response.json({ok:true,pending_topics:topics.size});
+   // Old unscoped queue recovery is intentionally disabled in explicit-session mode.
+   // Only /starttransactionsreview can create new review candidates.
+   return Response.json({ok:true,mode:"explicit_collection_only",pending_topics:0});
   }
   if(m){
     // Route discovery works before any Bank Assistant group/topic mapping exists.
