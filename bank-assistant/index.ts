@@ -52,6 +52,7 @@ async function ensureTelegramCommands(){
    {command:"checktxn",description:"Check bank transaction ID (Admin only)"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
     {command:"starttransactionsreview",description:"Begin bank review collection"},
+    {command:"canceltransactionsreview",description:"Discard current unapproved collection"},
     {command:"replytransaction",description:"Analyze replied bank notice (read-only)"},
     {command:"reviewtransaction",description:"Review active collection"},
    {command:"resumetransaction",description:"Open pending manual bank review"},
@@ -323,6 +324,26 @@ async function startBankCollection(m:any){
  return reply(m,"✅ <b>Okay, I'm Ready.</b>\n\n"+
  "Now forward your chosen bank transaction notifications in this topic. I will count them and show two buttons: <b>Review Now</b> and <b>Continue More</b>.\n"+
  "Other chat messages and notices sent before this command are excluded. No registration is automatic.");
+}
+async function cancelBankCollection(m:any){
+ if(!await allowed(m.from?.id))return reply(m,"🔒 Authorized Bank Assistant admin required.");
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0);
+ const {data:deleted,error}=await db().from("bb_bank_review_sessions")
+  .delete().eq("source_chat_id",chat).eq("source_thread_id",thread)
+  .eq("status","collecting").eq("requested_by_telegram_user_id",val(m.from.id))
+  .select("notice_count,prompt_message_id");
+ if(error)throw error;
+ const row=deleted?.[0];
+ if(!row)return reply(m,"🏦 No collecting bank session to cancel. An already-started review must be cancelled from its private review screen.");
+ if(Number(row.prompt_message_id||0)>0){
+  try{await tg("editMessageText",{
+   chat_id:chat,message_id:Number(row.prompt_message_id),
+   text:"🗑 <b>Bank collection cancelled</b>\n"+
+    Number(row.notice_count||0)+" temporary notices discarded. No bank balances changed.",
+   parse_mode:"HTML",reply_markup:{inline_keyboard:[]}
+  });}catch(_){}
+ }
+ return reply(m,"🗑 Cancelled this bank collection and discarded <b>"+Number(row.notice_count||0)+"</b> temporary notices. Bank Register and payments are unchanged.");
 }
 async function updateBankCollectPrompt(m:any,id:string,r:any){
  const chat=val(m.chat.id),thread=Number(m.message_thread_id||0),
@@ -662,6 +683,7 @@ async function handle(m:any,scope:RouteScope){
   return report(m,parseNotice(txt),scope,false);
  }
  if(/^\/starttransactionsreview(?:@\w+)?$/i.test(t))return startBankCollection(m);
+ if(/^\/canceltransactionsreview(?:@\w+)?$/i.test(t))return cancelBankCollection(m);
  if(/^\/resumetransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  const bankAddReply=bankAddReplyData(m);
