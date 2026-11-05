@@ -1025,6 +1025,8 @@ async function bbTransactionDetect(m:any):Promise<boolean>{
 
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
+ // Slash commands always route to command handlers, never bank-notice ingestion.
+ if(/^\//.test(t))return false;
  if(/^\/(?:reviewtransaction|resumetransaction)(?:@\w+)?$/i.test(t))return false;
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
  // Forwarded bank notices are silently staged until the administrator requests batch review.
