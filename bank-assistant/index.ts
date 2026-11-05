@@ -51,8 +51,8 @@ async function ensureTelegramCommands(){
    {command:"bankhelp",description:"Show Bank Assistant help"},
    {command:"checktxn",description:"Check bank transaction ID (Admin only)"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
-    {command:"reviewtransaction",description:"Register known transfers; review exceptions"},
-   {command:"resumetransaction",description:"Process pending bank transfers"},
+    {command:"reviewtransaction",description:"Open manual bank transaction review"},
+   {command:"resumetransaction",description:"Open pending manual bank review"},
    {command:"myid",description:"Show your Telegram user ID"},
    {command:"groupid",description:"Show this group and topic ID for routing"}
   ]},
@@ -66,7 +66,7 @@ async function ensureTelegramCommands(){
    {command:"photo",description:"Check Invoice Photo Organizer mapping"},
    {command:"phototest",description:"Test group and private message delivery"},
    {command:"review",description:"Open picture review with date and number boxes"},
-    {command:"reviewtransaction",description:"Register safe transfers; review exceptions"},
+    {command:"reviewtransaction",description:"Open manual bank transaction review"},
    {command:"done",description:"Finish forwarding pictures and open review"},
    {command:"cancel",description:"Discard the pending forwarded-photo batch"}
   ]}
@@ -302,7 +302,7 @@ function bankDraftRow(m:any){
 async function beginBankTransactionReview(m:any,scope:RouteScope|null){
  const commandUser=val(m.from?.id),privateChat=val(m.chat?.type)==="private"&&val(m.chat?.id)===commandUser;
  if(!await allowed(commandUser)){
-   await reply(m,"🔒 Only an authorized Bank Assistant administrator may process bank registrations.");
+   await reply(m,"🔒 Only an authorized Bank Assistant administrator may open a bank review.");
    return;
  }
  if(!privateChat&&!scope){
@@ -343,46 +343,23 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
    await reply(m,"⚠️ Could not stage the queued bank messages safely. No auto-registration was run; try /reviewtransaction again.");
    return;
  }
- // All protected per-draft database checks happen in one server round-trip.
- const {data:auto,error:autoError}=await client.rpc("bb_bank_assistant_auto_process_batch_v1",{
-   p_chat:sourceChat,p_thread:sourceThread,
-   p_reviewer:reviewer,p_command_user:commandUser,p_limit:100
- });
- if(autoError){
-   await reply(m,"⚠️ Automatic registration is unavailable: "+escape(val(autoError.message).slice(0,160))+
-     "\nAll notices remain pending, with no unsafe bank registration.");
-   return;
- }
- const registered=Number(auto?.registered||0),duplicate=Number(auto?.duplicate||0),
-       errors=Number(auto?.errors||0),totalUsd=Number(auto?.usd||0),totalKhr=Number(auto?.khr||0);
- const items=(Array.isArray(auto?.rows)?auto.rows:[]).slice(0,12).map((r:any)=>
-   "• "+escape(val(r.customer_id))+" · "+escape(val(r.currency))+" "+
-   escape(Number(r.amount).toLocaleString("en-US",{maximumFractionDigits:2}))+
-   " · <code>"+escape(val(r.transaction_id))+"</code>");
- const duplicates=(Array.isArray(auto?.duplicate_ids)?auto.duplicate_ids:[]).slice(0,12)
-   .map((id:any)=>"<code>"+escape(val(id))+"</code>");
-
+ // MANUAL REVIEW MODE: do not register bank balances or change payments here.
+ // All forwarded notices stay as candidates for explicit administrative approval.
  const {count:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
-   .select("draft_id",{count:"exact",head:true}).eq("source_chat_id",sourceChat)
-   .eq("source_thread_id",sourceThread).eq("status","candidate").is("review_batch_id",null)
+   .select("draft_id",{count:"exact",head:true})
+   .eq("source_chat_id",sourceChat).eq("source_thread_id",sourceThread)
+   .eq("status","candidate").is("review_batch_id",null)
    .gt("expires_at",new Date().toISOString());
  if(pendingError)throw pendingError;
  const {count:queuePending,error:queueError}=await client.from("bb_bank_assistant_queue")
    .select("queue_id",{count:"exact",head:true})
    .eq("telegram_chat_id",sourceChat).eq("telegram_thread_id",sourceThread);
  if(queueError)throw queueError;
- const outstanding=Number(pending||0),pendingQueue=Number(queuePending||0);
- const summary="🏦 <b>BIG BROTHER — Bank Assistant Summary</b>\n\n"+
-   "✅ Auto-registered customer bank balances: <b>"+registered+"</b>\n"+
-   "💵 Credited USD: <b>$"+totalUsd.toFixed(2)+"</b>\n"+
-   "៛ Credited KHR: <b>៛"+totalKhr.toLocaleString("en-US")+"</b>\n"+
-   "⏭ Already registered / duplicate IDs skipped: <b>"+duplicate+"</b>\n"+
-   "🔎 Exceptions needing your review: <b>"+outstanding+"</b>\n"+
-   (errors?"⚠️ Server checks held "+errors+" item(s) for review.\n":"")+
-   (pendingQueue?"⚠️ "+pendingQueue+" source notice(s) still in queue. Run /reviewtransaction again.\n":"")+
-   (items.length?"\n<b>Registered transactions</b>\n"+items.join("\n")+"\n":"")+
-   (duplicates.length?"\n<b>Skipped duplicate references</b>\n"+duplicates.join(", ")+"\n":"")+
-   "\n<i>Only available customer bank balances were created. No A/R clearing, invoice payment, or FX conversion.</i>";
+ const summary="🏦 <b>BIG BROTHER — Manual Bank Review</b>\n\n"+
+   "📋 New forwarded notices: <b>"+Number(pending||0)+"</b>\n"+
+   "🔒 Automatic registration: <b>OFF</b>\n"+
+   (Number(queuePending||0)?"⚠️ "+Number(queuePending||0)+" queued notice(s) still awaiting staging.\n":"")+
+   "\n<i>No bank balances or invoice payments are created until an administrator explicitly approves them in the review screen.</i>";
  const {data,error}=await client.rpc("bb_bank_start_transaction_review",{
    p_reviewer:reviewer,p_chat:privateChat?null:sourceChat,
    p_thread:privateChat?null:sourceThread
@@ -401,10 +378,10 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
  try{
    const sent=await tg("sendMessage",{
      chat_id:reviewer,parse_mode:"HTML",
-     text:(resuming?"♻️ <b>RESUME Bank Transaction Review</b>\n\n":"🏦 <b>Bank Transaction Exceptions</b>\n\n")+
+     text:(resuming?"♻️ <b>RESUME Bank Transaction Review</b>\n\n":"🏦 <b>Bank Transaction Review</b>\n\n")+
        "<b>"+count+" notice(s)</b> for administrator decision.\n"+
        (resuming?"Finish this batch before new exception notices can enter the review.\n":"")+
-       "Unknown, ambiguous, staff, missing-reference or unsafe notices need your selection.\n"+
+       "Every forwarded notice requires your review and explicit final approval.\n"+
        "Bank balances will register only with explicit approval in this manual review.",
      reply_markup:{inline_keyboard:[[{text:(resuming?"♻️ Resume ":"📋 Review ")+count+" Transactions",web_app:{url}}]]}
    });
