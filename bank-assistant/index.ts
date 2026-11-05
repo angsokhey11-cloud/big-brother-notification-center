@@ -310,8 +310,12 @@ function bankCollectSummary(r:any){
  return "🏦 <b>BIG BROTHER — Bank Review Collection</b>\n\n"+
  "📥 Received: <b>"+Number(r.count||r.notice_count||0)+" transaction notices</b>\n"+
  "💵 USD: <b>$"+Number(r.total_usd||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</b>\n"+
- "៛ KHR: <b>៛"+Number(r.total_khr||0).toLocaleString("en-US",{maximumFractionDigits:0})+"</b>\n\n"+
- "Would you like to review now, or forward more transactions?\n"+
+ "៛ KHR: <b>៛"+Number(r.total_khr||0).toLocaleString("en-US",{maximumFractionDigits:0})+"</b>\n"+
+ (r.latest_sender||r.latest_amount!=null||r.latest_kind?
+   "\n🧾 <b>Latest received:</b> "+escape(val(r.latest_sender)||val(r.latest_kind)||"Unidentified payer")+
+   (r.latest_currency&&r.latest_amount!=null?" · "+escape(r.latest_currency)+" "+Number(r.latest_amount).toLocaleString("en-US",{maximumFractionDigits:2}):"")+
+   (r.latest_transaction_id?"\nReference: <code>"+escape(r.latest_transaction_id)+"</code>":"")+"\n":"")+
+ "\nWould you like to review now, or forward more transactions?\n"+
  "<i>Notice amounts only; not yet registered or verified.</i>";
 }
 async function startBankCollection(m:any){
@@ -386,7 +390,12 @@ async function stageActiveBankNotice(m:any):Promise<void>{
    currency:row.currency,received_date:row.received_date,bank_channel:row.bank_channel}
  });
  if(error)throw error;
- if(data?.accepted&&data?.new)await updateBankCollectPrompt(m,session.session_id,data);
+ if(data?.accepted&&data?.new)await updateBankCollectPrompt(m,session.session_id,{
+  ...data,latest_sender:val(row.sender_name).slice(0,65),
+  latest_amount:row.amount,latest_currency:row.currency,
+  latest_transaction_id:row.transaction_id,
+  latest_kind:m.photo?"Image notice":m.document?"Document notice":""
+ });
  else if(data?.reason==="limit_reached")await reply(m,"📋 You have collected 100 bank notices. Tap Review Now before forwarding more.");
 }
 async function bankCollectCallback(cb:any):Promise<boolean>{
