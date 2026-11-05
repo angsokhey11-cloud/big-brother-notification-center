@@ -49,19 +49,24 @@ async function ensureTelegramCommands(){
   {scope:{type:"all_group_chats"},commands:[
    {command:"help",description:"Show supported bank notice formats"},
    {command:"bankhelp",description:"Show Bank Assistant help"},
+   {command:"checktxn",description:"Check bank transaction ID (Admin only)"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
-    {command:"reviewtransaction",description:"Prepare private bank transaction review"},
+    {command:"reviewtransaction",description:"Register known transfers; review exceptions"},
+   {command:"resumetransaction",description:"Process pending bank transfers"},
    {command:"myid",description:"Show your Telegram user ID"},
    {command:"groupid",description:"Show this group and topic ID for routing"}
   ]},
   {scope:{type:"all_private_chats"},commands:[
    {command:"start",description:"Welcome and show your Telegram ID"},
+    {command:"staff",description:"Open BIG BROTHER Staff Assistant"},
+    {command:"language",description:"Change Staff Assistant language"},
    {command:"help",description:"Show the private bot command menu"},
    {command:"myid",description:"Show your Telegram User ID"},
+   {command:"checktxn",description:"Check bank transaction ID (Admin only)"},
    {command:"photo",description:"Check Invoice Photo Organizer mapping"},
    {command:"phototest",description:"Test group and private message delivery"},
    {command:"review",description:"Open picture review with date and number boxes"},
-    {command:"reviewtransaction",description:"Review bank transfers privately on request"},
+    {command:"reviewtransaction",description:"Register safe transfers; review exceptions"},
    {command:"done",description:"Finish forwarding pictures and open review"},
    {command:"cancel",description:"Discard the pending forwarded-photo batch"}
   ]}
@@ -103,7 +108,64 @@ async function clearReplyMarkup(chatId:unknown,messageId:unknown){
  if(!chat||!Number.isSafeInteger(id)||id<1)return;
  try{await tg("editMessageReplyMarkup",{chat_id:chat,message_id:id,reply_markup:{inline_keyboard:[]}});}catch(_){}
 }
+function bankNoticeDate(raw:string):string|null{
+ const s=raw.replace(/[\u17e0-\u17e9]/g,d=>String(d.charCodeAt(0)-0x17e0));
+ const mon:Record<string,number>={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+ const patterns=[
+  /(?:^|\n)\s*(?:transaction\s*(?:date|time)|payment\s*(?:date|time)|transfer\s*(?:date|time)|received\s*(?:date|time)|date|time)\s*[:：-]?\s*([^\n]+)/ig,
+  /\bpaid\s+by\b[^\n]{0,130}\bon\s+([^\n]+)/ig
+ ];
+ const candidates=new Set<string>();
+ for(const pattern of patterns)for(const hit of s.matchAll(patterns[patterns.indexOf(pattern)])){
+  const value=hit[1].trim();
+  let y=0,m=0,d=0;
+  let v=value.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?!\d)/);
+  if(v){y=+v[1];m=+v[2];d=+v[3];}
+  else {
+   v=value.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?!\d)/);
+   if(v){d=+v[1];m=+v[2];y=+v[3];}
+   else {
+    v=value.match(/^(\d{1,2})[\s-]+([a-z]{3,9})[\s,\-/]+(\d{4})/i);
+    if(v){d=+v[1];m=mon[v[2].slice(0,3).toLowerCase()]||0;y=+v[3];}
+    else {
+     // ABA PayWay: "on Oct 04, 10:27 AM" (bank notice has no year).
+     v=value.match(/^([a-z]{3,9})\s+(\d{1,2})(?:\s*,|\s|$)/i);
+     if(v){m=mon[v[1].slice(0,3).toLowerCase()]||0;d=+v[2];y=+(new Date(Date.now()+7*3600000).toISOString().slice(0,4));}
+    }
+   }
+  }
+  const iso=[String(y).padStart(4,"0"),String(m).padStart(2,"0"),String(d).padStart(2,"0")].join("-");
+  const test=new Date(Date.UTC(y,m-1,d));
+  if(y>=2000&&y<=2100&&test.getUTCFullYear()===y&&test.getUTCMonth()+1===m&&test.getUTCDate()===d&&iso<=new Date(Date.now()+7*3600000).toISOString().slice(0,10))candidates.add(iso);
+ }
+ return candidates.size===1?[...candidates][0]:null;
+}
+
+// ACLEDA incoming Khmer notice: read-only extraction, not a bank registration.
+function parseAcledaNotice(raw:string){
+ const t=raw.trim().replace(/[\u200b-\u200d\ufeff]/g,"").replace(/[\u17e0-\u17e9]/g,x=>String(x.charCodeAt(0)-0x17e0));
+ if(!/^បានទទួល\s+/u.test(t))return null;
+ const head=t.match(/^បានទទួល\s+([\d,]+(?:\.\d{1,4})?)\s+(ដុល្លារ|រៀល)\s+ពី\s+([0-9]{2,4}[*xX•]{2,}[0-9]{3,6})\s+([^,\r\n]{2,140}?)\s*,/u);
+ const d=t.match(/ថ្ងៃទី\s*([0-9]{1,2})\s*(?:ខែ\s*)?([ក-៿]+)\s*(?:ឆ្នាំ\s*)?([0-9]{4})/u);
+ const tx=t.match(/លេខយោង\s*[:：#]?\s*([0-9A-Z-]{5,80})/iu);
+ if(!head||!d||!tx)return null;
+ const months:Record<string,number>={"មករា":1,"កុម្ភៈ":2,"មីនា":3,"មេសា":4,"ឧសភា":5,"មិថុនា":6,"កក្កដា":7,"សីហា":8,"កញ្ញា":9,"តុលា":10,"វិច្ឆិកា":11,"ធ្នូ":12};
+ const year=Number(d[3]),month=months[d[2]]||0,day=Number(d[1]);
+ const test=new Date(Date.UTC(year,month-1,day));
+ const iso=[year,String(month).padStart(2,"0"),String(day).padStart(2,"0")].join("-");
+ if(!month||year<2000||year>2100||test.getUTCFullYear()!==year||test.getUTCMonth()+1!==month||test.getUTCDate()!==day||iso>new Date(Date.now()+7*3600000).toISOString().slice(0,10))return null;
+ const money=Number(head[1].replace(/,/g,"")),currency=head[2]==="រៀល"?"KHR":"USD";
+ if(!Number.isFinite(money)||money<=0||(currency==="KHR"&&!Number.isInteger(money))||(currency==="USD"&&Math.abs(Math.round(money*100)-money*100)>0.00001))return null;
+ const clock=t.match(/,\s*([0-9]{1,2}):([0-9]{2})\s*(ព្រឹក|ល្ងាច|រសៀល|យប់)/u);
+ const hh=clock?Number(clock[1]):0,mm=clock?Number(clock[2]):0;
+ const receivedTime=clock&&hh>=1&&hh<=12&&mm<=59?String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+(clock[3]==="ព្រឹក"?" AM":" PM"):"";
+ const terminal=t.match(/(?:^|[,，])\s*នៅ\s*([^,\r\n]+?)\s+STAND\s*[:：]\s*([0-9]{4,24})/iu);
+ return {sender:head[4].trim(),currency,amount:money,transactionId:tx[1],receivedDate:iso,receivedTime,senderPhone:head[3],receiver:terminal?.[1]?.trim()||"",stand:terminal?.[2]||"",channel:"ACLEDA"};
+}
+
 function parseNotice(raw:string){
+ const acleda=parseAcledaNotice(raw.slice(0,4500));
+ if(acleda)return acleda;
  const t=raw.slice(0,4500).trim();
  const grab=(patterns:RegExp[])=>{for(const p of patterns){const x=t.match(p);if(x?.[1])return x[1].trim();}return "";};
  const cleanSender=(value:string)=>val(value)
@@ -169,7 +231,9 @@ function parseNotice(raw:string){
    currency,
    amount:rawAmount?amount(rawAmount):null,
    transactionId:tx,
-   channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):""
+   receivedDate:bankNoticeDate(t),
+   channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):"",
+   receivedTime:"",senderPhone:"",receiver:"",stand:""
  };
 }
 function combos(rows:Invoice[],sum:number,currency:string){
@@ -189,7 +253,11 @@ function noticeDetails(n:ReturnType<typeof parseNotice>){
  let result="\nឈ្មោះអ្នកផ្ទេរ៖ <b>"+escape(n.sender||"មិនមានឈ្មោះ")+"</b>";
  if(n.currency&&n.amount!==null)result+="\nចំនួនទឹកប្រាក់៖ "+escape(n.currency)+" "+escape(n.amount.toLocaleString("en-US",{maximumFractionDigits:2}));
  if(n.transactionId)result+="\nលេខប្រតិបត្តិការ៖ "+escape(n.transactionId);
- if(n.channel)result+="\nប្រភេទផ្ទេរ៖ "+escape(n.channel)+" (មិនមែនជាធនាគាររបស់អ្នកផ្ញើដែលបានផ្ទៀងផ្ទាត់)";
+ if(n.receivedDate)result+="\nកាលបរិច្ឆេទ៖ "+escape(n.receivedDate)+(n.receivedTime?" · "+escape(n.receivedTime):"");
+ if(n.senderPhone)result+="\nលេខទូរស័ព្ទ៖ "+escape(n.senderPhone);
+ if(n.channel==="ACLEDA")result+="\nប្រភពសារ៖ ACLEDA (មិនមែនជាធនាគាររបស់អ្នកផ្ញើដែលបានផ្ទៀងផ្ទាត់)";
+ else if(n.channel)result+="\nប្រភេទផ្ទេរ៖ "+escape(n.channel)+" (មិនមែនជាធនាគាររបស់អ្នកផ្ញើដែលបានផ្ទៀងផ្ទាត់)";
+ if(n.receiver)result+="\nទទួលនៅ៖ "+escape(n.receiver)+(n.stand?" · STAND "+escape(n.stand):"");
  return result;
 }
 // Offer a bank register review, never create any accounting record on detection.
@@ -203,7 +271,8 @@ async function newInvoiceRegisterPrompt(m:any,notice:ReturnType<typeof parseNoti
  const {error}=await db().from("bb_bank_new_invoice_review_drafts").upsert({
   source_chat_id:chat,source_thread_id:thread,source_message_id:mid,
   sender_name:notice.sender,transaction_id:notice.transactionId||null,
-  amount:notice.amount,currency:notice.currency,bank_channel:notice.channel||null
+  amount:notice.amount,currency:notice.currency,bank_channel:notice.channel||null,
+  received_date:notice.receivedDate
  },{onConflict:"source_chat_id,source_thread_id,source_message_id",ignoreDuplicates:true});
  if(error)console.warn("Bank notice review metadata capture failed",error.code||"db");
  return {};
@@ -213,56 +282,137 @@ async function newInvoiceRegisterClick(cb:any,_scope:RouteScope){
  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Send /reviewtransaction in your Bank Assistant topic to get a private review batch.",show_alert:true});
  return true;
 }
+// Silent bank intake: parse fields locally; do not query customers or send replies.
+function bankDraftRow(m:any){
+ const raw=val(m.text||m.caption),parsed=raw?parseNotice(raw):null;
+ const onlyId=raw.match(/^(?:លេខយោង\s*[:：]?\s*|Trx\.?\s*ID\s*[:：]?\s*)?([0-9]{5,20})$/iu);
+ const id=parsed?.transactionId||onlyId?.[1]||null;
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),mid=Number(m.message_id||0);
+ if(!chat||!Number.isSafeInteger(mid)||mid<1)return null;
+ return {
+   source_chat_id:chat,source_thread_id:thread,source_message_id:mid,
+   sender_name:parsed?.sender||null,transaction_id:id,
+   amount:parsed?.amount!=null&&Number.isFinite(parsed.amount)&&parsed.amount>0?parsed.amount:null,
+   currency:parsed?.currency||null,bank_channel:parsed?.channel||null,
+   received_date:parsed?.receivedDate||null,
+   expires_at:new Date(Date.now()+7*24*3600000).toISOString()
+ };
+}
 // Explicit trigger only: one private reviewer is assigned to every mapped group/topic.
 async function beginBankTransactionReview(m:any,scope:RouteScope|null){
- const sender=val(m.from?.id),privateChat=m.chat?.type==="private"&&val(m.chat.id)===sender;
- if(!await allowed(sender)){
-  await reply(m,"🔒 Only an authorized Bank Assistant administrator can request a private transaction review.");
-  return;
+ const commandUser=val(m.from?.id),privateChat=val(m.chat?.type)==="private"&&val(m.chat?.id)===commandUser;
+ if(!await allowed(commandUser)){
+   await reply(m,"🔒 Only an authorized Bank Assistant administrator may process bank registrations.");
+   return;
  }
  if(!privateChat&&!scope){
-  await reply(m,"🔒 Review is available only in a mapped Bank Assistant group/topic or your personal bot chat.");
-  return;
- }
- let reviewer=sender;
- if(!privateChat){
-  const {data:mapping,error:mapError}=await db().from("bb_bank_review_personal_routes")
-   .select("reviewer_telegram_user_id").eq("source_chat_id",val(m.chat.id))
-   .eq("source_thread_id",Number(m.message_thread_id||0)).eq("active",true).maybeSingle();
-  if(mapError)throw mapError;
-  if(!mapping?.reviewer_telegram_user_id){
-   await reply(m,"🏦 No personal review account mapped for this Bank Assistant topic. Configure it in Telegram Manager → Bank Personal Review Routes.");
+   await reply(m,"🔒 Please use your mapped Bank Assistant group/topic or private bot chat.");
    return;
-  }
-  reviewer=val(mapping.reviewer_telegram_user_id);
  }
- const {data,error}=await db().rpc("bb_bank_start_transaction_review",{
-  p_reviewer:reviewer,p_chat:privateChat?null:val(m.chat.id),
-  p_thread:privateChat?null:Number(m.message_thread_id||0)
+ const client=db();
+ let reviewer=commandUser,sourceChat=privateChat?"":val(m.chat.id);
+ let sourceThread=privateChat?0:Number(m.message_thread_id||0);
+ if(privateChat){
+   const {data:routes,error}=await client.from("bb_bank_review_personal_routes")
+     .select("source_chat_id,source_thread_id").eq("reviewer_telegram_user_id",reviewer)
+     .eq("active",true).limit(3);
+   if(error)throw error;
+   if(!routes||routes.length!==1){
+     await reply(m,"🏦 More than one bank topic is mapped. Send /reviewtransaction in the specific Bank Assistant topic.");
+     return;
+   }
+   sourceChat=val(routes[0].source_chat_id);sourceThread=Number(routes[0].source_thread_id||0);
+ }else{
+   const {data:route,error}=await client.from("bb_bank_review_personal_routes")
+     .select("reviewer_telegram_user_id").eq("source_chat_id",sourceChat)
+     .eq("source_thread_id",sourceThread).eq("active",true).maybeSingle();
+   if(error)throw error;
+   if(!route?.reviewer_telegram_user_id){
+     await reply(m,"🏦 First configure the mapped private bank reviewer in Telegram Manager.");
+     return;
+   }
+   reviewer=val(route.reviewer_telegram_user_id);
+ }
+ try{
+   if(!(await drainTopicQueue(sourceChat,sourceThread))){
+     await reply(m,"⚠️ Bank queue is busy. Retry /reviewtransaction when it unlocks.");
+     return;
+   }
+ }catch(e){
+   console.warn("Bank queue intake held",e instanceof Error?e.name:"error");
+   await reply(m,"⚠️ Could not stage the queued bank messages safely. No auto-registration was run; try /reviewtransaction again.");
+   return;
+ }
+ // All protected per-draft database checks happen in one server round-trip.
+ const {data:auto,error:autoError}=await client.rpc("bb_bank_assistant_auto_process_batch_v1",{
+   p_chat:sourceChat,p_thread:sourceThread,
+   p_reviewer:reviewer,p_command_user:commandUser,p_limit:100
  });
- if(error){await reply(m,"⚠️ Unable to start bank review: "+escape(error.message.slice(0,220)));return;}
- const count=Number(data?.count||0),batch=val(data?.batch_id);
+ if(autoError){
+   await reply(m,"⚠️ Automatic registration is unavailable: "+escape(val(autoError.message).slice(0,160))+
+     "\nAll notices remain pending, with no unsafe bank registration.");
+   return;
+ }
+ const registered=Number(auto?.registered||0),duplicate=Number(auto?.duplicate||0),
+       errors=Number(auto?.errors||0),totalUsd=Number(auto?.usd||0),totalKhr=Number(auto?.khr||0);
+ const items=(Array.isArray(auto?.rows)?auto.rows:[]).slice(0,12).map((r:any)=>
+   "• "+escape(val(r.customer_id))+" · "+escape(val(r.currency))+" "+
+   escape(Number(r.amount).toLocaleString("en-US",{maximumFractionDigits:2}))+
+   " · <code>"+escape(val(r.transaction_id))+"</code>");
+ const duplicates=(Array.isArray(auto?.duplicate_ids)?auto.duplicate_ids:[]).slice(0,12)
+   .map((id:any)=>"<code>"+escape(val(id))+"</code>");
+
+ const {count:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
+   .select("draft_id",{count:"exact",head:true}).eq("source_chat_id",sourceChat)
+   .eq("source_thread_id",sourceThread).eq("status","candidate").is("review_batch_id",null)
+   .gt("expires_at",new Date().toISOString());
+ if(pendingError)throw pendingError;
+ const {count:queuePending,error:queueError}=await client.from("bb_bank_assistant_queue")
+   .select("queue_id",{count:"exact",head:true})
+   .eq("telegram_chat_id",sourceChat).eq("telegram_thread_id",sourceThread);
+ if(queueError)throw queueError;
+ const outstanding=Number(pending||0),pendingQueue=Number(queuePending||0);
+ const summary="🏦 <b>BIG BROTHER — Bank Assistant Summary</b>\n\n"+
+   "✅ Auto-registered customer bank balances: <b>"+registered+"</b>\n"+
+   "💵 Credited USD: <b>$"+totalUsd.toFixed(2)+"</b>\n"+
+   "៛ Credited KHR: <b>៛"+totalKhr.toLocaleString("en-US")+"</b>\n"+
+   "⏭ Already registered / duplicate IDs skipped: <b>"+duplicate+"</b>\n"+
+   "🔎 Exceptions needing your review: <b>"+outstanding+"</b>\n"+
+   (errors?"⚠️ Server checks held "+errors+" item(s) for review.\n":"")+
+   (pendingQueue?"⚠️ "+pendingQueue+" source notice(s) still in queue. Run /reviewtransaction again.\n":"")+
+   (items.length?"\n<b>Registered transactions</b>\n"+items.join("\n")+"\n":"")+
+   (duplicates.length?"\n<b>Skipped duplicate references</b>\n"+duplicates.join(", ")+"\n":"")+
+   "\n<i>Only available customer bank balances were created. No A/R clearing, invoice payment, or FX conversion.</i>";
+ const {data,error}=await client.rpc("bb_bank_start_transaction_review",{
+   p_reviewer:reviewer,p_chat:privateChat?null:sourceChat,
+   p_thread:privateChat?null:sourceThread
+ });
+ if(error){
+   await reply(m,summary+"\n\n⚠️ Review could not open: "+escape(val(error.message).slice(0,160)));
+   return;
+ }
+ const count=Number(data?.count||0),batch=val(data?.batch_id),resuming=data?.existing===true;
  if(!batch||count<1){
-  await reply(m,"🏦 No unreviewed bank notifications available for this mapped topic. Keep forwarding normally, then ask /reviewtransaction.");
-  return;
+   await reply(m,summary+"\n\n✅ No manual review batch is outstanding.");
+   return;
  }
  const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-batch-review.html?batch="+
-  encodeURIComponent(batch)+"&v=cancel-review-20261010";
+   encodeURIComponent(batch)+"&v=silent-bank-auto-20261105";
  try{
-  const sent=await tg("sendMessage",{
-    chat_id:reviewer,
-    text:"🏦 <b>BIG BROTHER — Personal Bank Transaction Review</b>\n\n"+
-      "📋 <b>"+count+" transactions</b> to review.\n"+
-      "Only NEW Invoice Generator payments may be registered. Leave A/R and unrelated transfers alone.\n"+
-      "No registration occurs until you approve each New Invoice payment and confirm the summary.",
-    parse_mode:"HTML",reply_markup:{inline_keyboard:[[
-      {text:"📋 Open "+count+" Bank Transactions",web_app:{url}}
-    ]]}
-  });
-  if(sent?.ok!==true)throw Error("Telegram message not accepted");
-  if(!privateChat)await reply(m,"✅ On-demand bank review sent to the mapped personal Telegram account. Normal transaction analysis remains unchanged.");
+   const sent=await tg("sendMessage",{
+     chat_id:reviewer,parse_mode:"HTML",
+     text:(resuming?"♻️ <b>RESUME Bank Transaction Review</b>\n\n":"🏦 <b>Bank Transaction Exceptions</b>\n\n")+
+       "<b>"+count+" notice(s)</b> for administrator decision.\n"+
+       (resuming?"Finish this batch before new exception notices can enter the review.\n":"")+
+       "Unknown, ambiguous, staff, missing-reference or unsafe notices need your selection.\n"+
+       "Bank balances will register only with explicit approval in this manual review.",
+     reply_markup:{inline_keyboard:[[{text:(resuming?"♻️ Resume ":"📋 Review ")+count+" Transactions",web_app:{url}}]]}
+   });
+   if(sent?.ok!==true)throw Error("Telegram rejected private bank task");
+   await reply(m,summary+"\n\n📋 <b>"+count+" manual review task(s)</b> sent privately."+
+     (resuming?"\nComplete the previous batch before new exceptions are added.":""));
  }catch(_){
-  await reply(m,"⚠️ Telegram could not deliver this review privately. The mapped reviewer must first open the bot and send /start. The review batch remains saved; no bank transactions were registered.");
+   await reply(m,summary+"\n\n⚠️ Manual review saved, but the private Telegram message could not be delivered. Reviewer should send /start to the bot.");
  }
 }
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
@@ -466,8 +616,22 @@ async function takePendingBankAdd(m:any){
    .eq("action","bankadd");
  return {customer:parts[0],holder:parts[1]};
 }
+async function resumeTransactionReplies(m:any){
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0);
+ const {count,error}=await db().from("bb_bank_assistant_queue")
+  .select("queue_id",{count:"exact",head:true})
+  .eq("telegram_chat_id",chat).eq("telegram_thread_id",thread);
+ if(error)throw error;
+ const pending=Number(count||0);
+ if(!pending)return reply(m,"✅ No pending bank transaction identity replies in this topic.");
+ await reply(m,"▶️ Resuming "+pending+" pending bank transaction identity repl"+(pending===1?"y":"ies")+" in this topic. Messages will be handled in their original order.");
+ const task=drainTopicQueue(chat,thread);
+ if((globalThis as any).EdgeRuntime?.waitUntil)(globalThis as any).EdgeRuntime.waitUntil(task);
+ else await task;
+}
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
+ if(/^\/resumetransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  const bankAddReply=bankAddReplyData(m);
  const pendingBankAdd=bankAddReply?null:await takePendingBankAdd(m);
@@ -481,15 +645,16 @@ async function handle(m:any,scope:RouteScope){
 "• <code>Ly Sreyleak paid $50</code>\n"+
 "• <code>Ly Sreyleak transfer 50 USD</code>\n"+
 "• <code>50$ - Ly Sreyleak</code>\n"+
-"• ABA PayWay / KHQR notification format\n\n"+
-"<b>Transaction ID:</b> មិនចាំបាច់មានទេ។ បើមាន ខ្ញុំនឹងប្រើវាសម្រាប់ពិនិត្យ duplicate។\n\n"+
+"• ABA PayWay / KHQR notification format\n• ACLEDA Khmer incoming notifications (USD / KHR)\n\n"+
+"<b>Transaction ID:</b> មិនចាំបាច់មានទេ។ បើមាន ខ្ញុំនឹងប្រើវាសម្រាប់ពិនិត្យ duplicate។\n"+
+"<b>Admin ID check:</b> <code>/checktxn 886444</code> or send <code>886444</code> alone.\n\n"+
 "<b>ស្វែងរកឈ្មោះអ្នកផ្ទេរ៖</b>\n"+
 "• <code>Who is KEO LAKHENA?</code>\n"+
 "• <code>តើ KEO LAKHENA ជានរណា?</code>\n\n"+
 "<b>Request sender name mapping:</b>\n"+
 "<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\n"+
 "ការរក្សាទុកត្រូវការ Admin អនុម័តជាមុន។\n\n"+
-"Forward សារធនាគារច្រើនបាន។ ខ្ញុំនឹងឆ្លើយតាមលំដាប់ក្នុង Topic ដដែល។"
+"Forward សារធនាគារច្រើនបានដោយមិនឆ្លើយរាល់សារ។ ប្រើ /reviewtransaction ដើម្បីកត់ត្រាប្រាក់ជូនអតិថិជនដែលស្គាល់ ពិនិត្យសារស្ទួន និងបើកការពិនិត្យពិសេស។"
 );
  if(/^\/myid(?:@\w+)?$/i.test(t))return reply(m,
   "🪪 <b>Your Telegram User ID</b>\n<code>"+escape(m.from?.id)+"</code>\n\nSend this ID to an Admin to enable approval rights."
@@ -533,7 +698,7 @@ async function handle(m:any,scope:RouteScope){
   if(m.photo?.length)return reply(m,"❌ <b>REJECTED — រូបភាពមិនអាចអានដោយកំណែនេះ</b>\nសូមបញ្ជូនសារជូនដំណឹងពីធនាគារជាអក្សរ ឬបន្ថែម Caption។");
   return;
  }
- if(!m.forward_origin&&!m.forward_date&&!/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛)/i.test(t))return;
+ if(!m.forward_origin&&!m.forward_date&&!/(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|បានទទួល)/i.test(t))return;
  const notice=parseNotice(t);
  if((m.forward_origin||m.forward_date)&&!notice.sender){
   return reply(m,"❌ <b>REJECTED — មិនស្គាល់ទម្រង់សារធនាគារ</b>"+noticeDetails(notice)+"\n\nខ្ញុំមិនអាចកំណត់ឈ្មោះអ្នកផ្ទេរពីសារនេះបានទេ។ សូមពិនិត្យទម្រង់សារ ឬបន្ថែម Parser សម្រាប់ធនាគារនេះ។");
@@ -578,6 +743,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      "🤖 <b>BIG BROTHER — Private Bot Commands</b>\n\n"+
      "👋 <code>/start</code> — Welcome and show my User ID\n"+
      "🪪 <code>/myid</code> — Show my Telegram User ID\n"+
+     "🔎 <code>/checktxn 886444</code> — Read-only payment lookup (Admin)\n"+
      "📸 <code>/photo</code> — Check private reviewer and output mappings\n"+
      "🧪 <code>/phototest</code> — Send harmless tests to mapped destinations\n"+
      "📋 <code>/review</code> — Open photo review with two input boxes\n"+
@@ -607,7 +773,7 @@ async function replyToPrivateIdentity(m:any):Promise<boolean>{
      "📸 <b>BIG BROTHER — Invoice Review</b>\n\n"+
      "Tap below to open the one-photo review screen with <b>Invoice Date</b> and <b>Invoice Number</b> boxes, plus <b>Save &amp; Next</b>.\n\n"+
      "If you have already forwarded your chosen photos, tap below to review them. If no batch is pending, the Mini App offers a harmless layout preview.",
-     {reply_markup:{inline_keyboard:[[{text:"📸 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=sticky-range-20261009"}}]]}}
+     {reply_markup:{inline_keyboard:[[{text:"📸 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=crop-rotate-20261015"}}]]}}
    );
    return true;
  }
@@ -723,21 +889,132 @@ async function invoicePhotoPrivate(m:any):Promise<boolean>{
    const {error:markError}=await client.from("bb_invoice_photo_review_batches").update({review_notice_sent_at:new Date().toISOString()}).eq("batch_id",data.batch_id);
    if(markError)throw markError;
    await reply(m,"✅ <b>"+Number(data.count)+" invoice pictures ready for review</b>\nTap below, check both boxes for every invoice, then approve sending to your mapped destinations.",
-     {reply_markup:{inline_keyboard:[[{text:"📋 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=sticky-range-20261009"}}]]}});
+     {reply_markup:{inline_keyboard:[[{text:"📋 Open Invoice Review",web_app:{url:"https://angsokhey11-cloud.github.io/big-brother-notification-center/invoice-photo-review.html?v=crop-rotate-20261015"}}]]}});
    return true;
  }
  return false;
 }
 
+
+// Read-only BIG BROTHER transaction detector. Admins only; no financial writes.
+// Standalone numeric IDs, or explicit /checktxn ID, never forwarded notices.
+// Display-only date: YYYY-MM-DD -> DD-Mmm-YYYY. Preserve storage and form input.
+function bbShownDate(input:unknown){
+ const str=val(input);
+ const m=str.match(/^(\d{4})-(\d{2})-(\d{2})(?=$|T|\s)/);
+ if(!m)return str||"-";
+ const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+ const month=Number(m[2]),day=Number(m[3]);
+ if(month<1||month>12||day<1||day>31)return str;
+ return m[3]+"-"+months[month-1]+"-"+m[1];
+}
+
+async function bbTransactionDetect(m:any):Promise<boolean>{
+ if(!m?.chat?.id || m?.from?.is_bot || m.forward_origin || m.forward_date)return false;
+ const t=val(m.text),cmd=t.match(/^\/checktxn(?:@\w+)?(?:\s+(\S+))?\s*$/i);
+ if(!cmd && !/^[0-9]{5,20}$/.test(t))return false;
+ const tx=val(cmd?cmd[1]:t).toUpperCase();
+ const privateChat=val(m.chat.type)==="private"&&val(m.from?.id)===val(m.chat.id);
+ if(!privateChat){
+   const route=await bankScope(m);
+   if(!route)return false;
+ }
+ if(!await allowed(m.from?.id)){
+   await reply(m,"🔒 Bank transaction lookup is available to authorized Telegram admins only.");
+   return true;
+ }
+ if(!/^[A-Z0-9-]{4,32}$/.test(tx)){
+   await reply(m,"🔎 Enter <code>/checktxn 886444</code> or just <code>886444</code>.");
+   return true;
+ }
+ const client=db();
+ const queries=[
+   client.from("payments").select("payment_id,invoice_id,invoice_no_snapshot,payment_date,customer_id,customer_name_snapshot,payment_method,bank_payment,bank_reference,location_code,currency,amount,payment_source,entered_by_name_snapshot").eq("transaction_id",tx).limit(10),
+   client.from("bb_verified_bank_transactions").select("customer_id,amount,currency,bank_name,status,received_date,used_payment_id,payer_name").eq("transaction_id",tx).limit(10),
+   client.from("bb_bank_balance_snapshot").select("customer_id,currency,original_amount,used_amount,remaining_amount,status").eq("transaction_id",tx).limit(10),
+   client.from("bb_bank_balance_allocations").select("payment_id,applied_bank_amount,invoice_currency,reversed_at").eq("transaction_id",tx).limit(16),
+   client.from("ar_payment_requests").select("request_id,customer_name_snapshot,customer_id,status,payment_id,request_date").eq("transaction_id",tx).limit(10),
+   client.from("bb_bank_new_invoice_review_drafts").select("amount,currency,received_date,status,review_decision").or("transaction_id.eq."+tx+",registered_transaction_id.eq."+tx).limit(10),
+   client.from("bb_cancelled_bank_transaction_ids").select("transaction_id,cancelled_at").eq("transaction_id",tx).limit(2),
+   client.from("purchase_payments").select("purchase_payment_id,client_name_snapshot,amount,currency,payment_date").eq("transaction_id",tx).limit(10)
+ ];
+ const responses:any[]=await Promise.all(queries);
+ if(responses.some(x=>x.error)){
+   console.error("Bank transaction lookup unavailable",responses.map((x,i)=>x.error?i:-1).filter(x=>x>=0));
+   await reply(m,"⚠️ Lookup temporarily unavailable. No payment records were changed.");
+   return true;
+ }
+ const [payments,banks,balances,allocations,requests,drafts,cancelled,purchases]:any[][]=responses.map(x=>x.data||[]);
+ const fm=(n:any,c:any)=>escape(val(c)||"USD")+" "+Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+ const lines=["🔎 <b>BIG BROTHER — Bank Transaction Check</b>","ID: <code>"+escape(tx)+"</code>"];
+ if(!responses.some(x=>x.data?.length)){
+   lines.push("","⚪ Not found in BIG BROTHER Cloud payment/bank registers.","<i>This does not confirm whether an actual bank transfer exists.</i>");
+   await reply(m,lines.join("\n"));return true;
+ }
+ const customerIds=new Set<string>();
+ for(const p of payments){
+   if(p.customer_id)customerIds.add(val(p.customer_id));
+   lines.push("","💵 <b>"+(val(p.payment_source).toLowerCase()==="receivable"?"Receivable Clear":"Invoice / Other Payment")+"</b>",
+     "Customer: "+escape(p.customer_name_snapshot||p.customer_id||"-"),
+     "Amount: <b>"+fm(p.amount,p.currency)+"</b> · "+escape(p.bank_payment||p.payment_method||"-"),
+     "Invoice: <code>"+escape(p.invoice_no_snapshot||"-")+"</code> · Payment: <code>"+escape(p.payment_id)+"</code>",
+     "Payment date: "+escape(bbShownDate(p.payment_date))+" · Location: "+escape(p.location_code||"-"));
+   if(p.bank_reference){
+     lines.push("Reference: "+escape(val(p.bank_reference).slice(0,150)));
+     const stated=val(p.bank_reference).match(/\$\s*([\d,]+(?:\.\d{1,2})?)/);
+     if(stated && val(p.currency).toUpperCase()==="USD"){
+       const num=Number(stated[1].replace(/,/g,""));
+       if(Number.isFinite(num)&&Math.abs(num-Number(p.amount||0))>=0.01)
+         lines.push("⚠️ Reference says $"+num.toFixed(2)+" but registered payment is "+fm(p.amount,p.currency));
+     }
+   }
+ }
+ if(payments.length){
+   const invoiceIds=[...new Set(payments.map(p=>val(p.invoice_id)).filter(Boolean))].slice(0,10);
+   if(invoiceIds.length){
+     const {data,error}=await client.from("invoices").select("invoice_id,invoice_no,invoice_date,status,outstanding,currency").in("invoice_id",invoiceIds);
+     if(!error)for(const inv of data||[])lines.push("Invoice "+escape(inv.invoice_no)+
+       "\n📅 <b>Original invoice date: "+escape(bbShownDate(inv.invoice_date))+"</b>"+
+       "\nStatus: "+escape(inv.status||"-")+" · Outstanding "+fm(inv.outstanding,inv.currency));
+   }
+ }
+ for(const b of banks){
+   if(b.customer_id)customerIds.add(val(b.customer_id));
+   lines.push("","🏦 <b>Bank Register</b>: "+fm(b.amount,b.currency),
+     "Customer ID: "+escape(b.customer_id||"-")+" · Status: "+escape(b.status||"-"),
+     "Received: "+escape(bbShownDate(b.received_date))+(b.used_payment_id?" · Linked payment: "+escape(b.used_payment_id):""));
+ }
+ for(const b of balances){
+   if(b.customer_id)customerIds.add(val(b.customer_id));
+   lines.push("","💼 Bank balance: Original "+fm(b.original_amount,b.currency)+" · Used "+fm(b.used_amount,b.currency),
+     "Remaining: "+fm(b.remaining_amount,b.currency)+" · "+escape(b.status||"-"));
+ }
+ if(allocations.length)lines.push("","🔗 Linked bank balance allocations: "+allocations.length+" (not automatically duplicate transactions)");
+ for(const r of requests.slice(0,5)){
+   if(r.customer_id)customerIds.add(val(r.customer_id));
+   lines.push("","📝 A/R request "+escape(r.request_id||"-")+" · "+escape(r.status||"-"),"Customer: "+escape(r.customer_name_snapshot||r.customer_id||"-"));
+ }
+ if(drafts.length)lines.push("","📋 Bank review tasks: "+drafts.length+" ("+drafts.slice(0,3).map(x=>escape(x.status||"-")).join(", ")+")");
+ if(cancelled.length)lines.push("","🚫 <b>Transaction ID is marked cancelled.</b>");
+ for(const p of purchases.slice(0,5))lines.push("","🧾 Purchase payment "+escape(p.purchase_payment_id)+" · "+fm(p.amount,p.currency),"Supplier: "+escape(p.client_name_snapshot||"-"));
+ if(payments.length+purchases.length>1||customerIds.size>1)
+   lines.push("","🚨 <b>Multiple uses/customers detected.</b> Verify whether this ID was submitted more than once.");
+ else if(payments.length||banks.length)
+   lines.push("","✅ <b>Already registered in BIG BROTHER.</b> Do not enter it again without checking the original payment.");
+ else lines.push("","⚠️ A related pending/cancelled record exists; do not assume this ID is unused.");
+ lines.push("","<i>Read-only Cloud lookup. No changes or bank verification.</i>");
+ await reply(m,lines.join("\n"));
+ return true;
+}
+
 function queueableNotice(m:any){
  const t=val(m?.text||m?.caption);
- if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return true;
+ if(/^\/(?:reviewtransaction|resumetransaction)(?:@\w+)?$/i.test(t))return false;
  if(/^\/bank(?:help|add)\b/i.test(t)||whoIsName(t))return false;
- // Every forwarded item is queued so it receives one ordered result,
- // including unsupported bank formats that must be explicitly rejected.
+ // Forwarded bank notices are silently staged until the administrator requests batch review.
  if(m?.forward_origin||m?.forward_date)return true;
  if(!t)return false;
- return /(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|paid\s+by|Trx\.?\s*ID)/i.test(t);
+ return /(?:received|transfer|transaction|sender|payer|payment|amount|\$|៛|paid\s+by|Trx\.?\s*ID|បានទទួល)/i.test(t);
 }
 async function enqueueNotice(updateId:number,m:any){
  const client=db();
@@ -751,52 +1028,68 @@ async function enqueueNotice(updateId:number,m:any){
  if(error)throw error;
 }
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-async function drainTopicQueue(chat:string,thread:number){
- const owner=crypto.randomUUID(),client=db();
+async function drainTopicQueue(chat:string,thread:number):Promise<boolean>{
+ const client=db(),owner=crypto.randomUUID();
  let acquired=false;
- for(let waitAttempt=0;waitAttempt<90;waitAttempt++){
-  const {data:locked,error:lockError}=await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45});
-  if(lockError)throw lockError;
-  if(locked===true){acquired=true;break;}
-  await sleep(1000);
- }
- if(!acquired)return;
- try{
-  for(let processed=0;processed<40;processed++){
-   const {data:row,error}=await client.from("bb_bank_assistant_queue")
-     .select("queue_id,payload,attempts").eq("telegram_chat_id",chat).eq("telegram_thread_id",thread)
-     .order("queue_id",{ascending:true}).limit(1).maybeSingle();
+ for(let attempt=0;attempt<90;attempt++){
+   const {data,error}=await client.rpc("bb_bank_assistant_try_lock",{
+     p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45
+   });
    if(error)throw error;
-   if(!row)break;
-   const m=row.payload;
-   try{
-    const scope=await bankScope(m);
-    if(scope&&await scopeAllows(m,scope))await handle(m,scope);
-    await client.from("bb_bank_assistant_queue").delete().eq("queue_id",row.queue_id);
-   }catch(error){
-    const attempts=Number(row.attempts||0)+1;
-    const message=error instanceof Error?error.message:"Unknown processing error";
-    console.error("Queued Telegram handling failed",message);
-    if(attempts>=3){
-      try{await reply(m,"⚠️ មិនអាចដំណើរការសារនេះបាននៅពេលនេះទេ។ សូមសាកល្បងបញ្ជូនម្តងទៀត។");}catch(_){}
-      await client.from("bb_bank_assistant_queue").delete().eq("queue_id",row.queue_id);
-    }else{
-      await client.from("bb_bank_assistant_queue").update({attempts,last_error:message.slice(0,500)}).eq("queue_id",row.queue_id);
-      await sleep(700);
-      continue;
-    }
-   }
-   await client.rpc("bb_bank_assistant_try_lock",{p_chat:chat,p_thread:thread,p_owner:owner,p_seconds:45});
-   const {count}=await client.from("bb_bank_assistant_queue").select("queue_id",{count:"exact",head:true})
-     .eq("telegram_chat_id",chat).eq("telegram_thread_id",thread);
-   const backlog=count||0;
-   if(backlog===1)await sleep(250);
-   else if(backlog<=4&&backlog>1)await sleep(900);
-   else if(backlog>4)await sleep(2600);
-  }
- }finally{
-  await client.rpc("bb_bank_assistant_unlock",{p_chat:chat,p_thread:thread,p_owner:owner}).catch(()=>{});
+   if(data===true){acquired=true;break;}
+   await sleep(150);
  }
+ if(!acquired)return false;
+ try{
+   // One bulk intake pass. No DB lookup or Telegram reply per forwarded notice.
+   const {data:rows,error:loadError}=await client.from("bb_bank_assistant_queue")
+     .select("queue_id,payload").eq("telegram_chat_id",chat)
+     .eq("telegram_thread_id",thread).lt("attempts",3)
+     .order("queue_id",{ascending:true}).limit(250);
+   if(loadError)throw loadError;
+   if(!rows?.length)return true;
+   const drafts:any[]=[];
+   for(const entry of rows){
+     const m=entry.payload;
+     if(val(m?.chat?.id)!==chat||Number(m?.message_thread_id||0)!==thread)continue;
+     const row=bankDraftRow(m);
+     if(row)drafts.push(row);
+   }
+   if(drafts.length){
+     const {error:insertError}=await client.from("bb_bank_new_invoice_review_drafts")
+       .upsert(drafts,{onConflict:"source_chat_id,source_thread_id,source_message_id",
+         ignoreDuplicates:true});
+     if(insertError)throw insertError;
+   }
+   const {error:removeError}=await client.from("bb_bank_assistant_queue")
+     .delete().in("queue_id",rows.map((r:any)=>r.queue_id));
+   if(removeError)throw removeError;
+   return true;
+ }finally{
+   await client.rpc("bb_bank_assistant_unlock",{
+     p_chat:chat,p_thread:thread,p_owner:owner
+   }).catch(()=>{});
+ }
+}
+// V3 private Staff Assistant handoff: do not persist incoming updates.
+// Group bank topics and invoice photo-review callbacks stay on original handlers.
+async function forwardPrivateStaffV3(update:any,webhookSecret:string):Promise<boolean>{
+ const cb=update?.callback_query,m=cb?.message||update?.message;
+ if(!m||val(m.chat?.type)!=="private"||val(m.chat?.id)!==val(cb?.from?.id||m.from?.id))return false;
+ if(cb&&!val(cb.data).startsWith("v3:"))return false;
+ if(!cb){
+  if(!val(m.text)||m.photo||m.document||m.video)return false;
+  if(/^\/(?:myid|help|photo|photostatus|phototest|review|done|cancel|reviewtransaction|resumetransaction|checktxn|bankhelp|bankadd)(?:@\w+)?\b/i.test(val(m.text)))return false;
+ }
+ try{
+  const endpoint=(Deno.env.get("SUPABASE_URL")||"")+"/functions/v1/bb-staff-assistant-v3";
+  const service=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")||"";
+  if(!service)return false;
+  const response=await fetch(endpoint,{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+service,"apikey":service,"x-bb-forwarded-secret":webhookSecret},body:JSON.stringify(update)});
+  if(!response.ok){console.warn("Private Staff V3 handoff failed:",response.status);return false;}
+  const result=await response.json();
+  return result?.handled===true;
+ }catch(_){console.warn("Private Staff V3 handoff unavailable");return false;}
 }
 Deno.serve(async(req:Request)=>{
  if(req.method!=="POST")return new Response("Method not allowed",{status:405});
@@ -807,9 +1100,21 @@ Deno.serve(async(req:Request)=>{
  try{
   try{await ensureTelegramCommands();}catch(e){console.warn("Telegram command menu setup failed",e instanceof Error?e.message:"error");}
   const u=await req.json(),m=u.message;
+  if(u?.bb_queue_recovery===true){
+   const {data,error}=await db().from("bb_bank_assistant_queue").select("telegram_chat_id,telegram_thread_id").order("queue_id",{ascending:true}).limit(500);
+   if(error)throw error;
+   const topics=new Map();
+   for(const row of data||[])topics.set(val(row.telegram_chat_id)+":"+Number(row.telegram_thread_id||0),row);
+   const task=Promise.all([...topics.values()].map(row=>drainTopicQueue(val(row.telegram_chat_id),Number(row.telegram_thread_id||0))));
+   if((globalThis as any).EdgeRuntime?.waitUntil)(globalThis as any).EdgeRuntime.waitUntil(task);
+   else await task;
+   return Response.json({ok:true,pending_topics:topics.size});
+  }
   if(m){
     // Route discovery works before any Bank Assistant group/topic mapping exists.
     if(await replyGroupAndTopicIds(m))return Response.json({ok:true});
+    if(await bbTransactionDetect(m))return Response.json({ok:true});
+    if(await forwardPrivateStaffV3(u,cfg.secret))return Response.json({ok:true});
     // Reply privately and stop; mapped group Bank Assistant handling remains untouched.
     if(await replyToPrivateIdentity(m))return Response.json({ok:true});
     if(m.chat?.type==="private"&&val(m.chat.id)===val(m.from?.id)&&
@@ -822,10 +1127,8 @@ Deno.serve(async(req:Request)=>{
     if(scope){
       if(await scopeAllows(m,scope)){
         if(queueableNotice(m)){
+          // Silent enqueuing; only /reviewtransaction invokes the batch processor.
           await enqueueNotice(Number(u.update_id||0),m);
-          const task=drainTopicQueue(val(m.chat.id),Number(m.message_thread_id||0));
-          try{(globalThis as any).EdgeRuntime?.waitUntil?.(task);}catch(_){}
-          if(!(globalThis as any).EdgeRuntime?.waitUntil)await task;
         }else{
           await handle(m,scope);
         }
@@ -835,6 +1138,7 @@ Deno.serve(async(req:Request)=>{
     }
   }
   if(u.callback_query){
+    if(await forwardPrivateStaffV3(u,cfg.secret))return Response.json({ok:true});
     const scope=await bankScope(u.callback_query.message);
     if(scope&&await scopeAllows({from:u.callback_query.from},scope)){
       if(!await newInvoiceRegisterClick(u.callback_query,scope))await callback(u.callback_query);
