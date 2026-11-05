@@ -6,7 +6,9 @@
 // Legacy review links remain on their original one-at-a-time interface.
 if(new URLSearchParams(location.search).get("v")==="explicit-bank-session-20261105"){
  document.documentElement.style.visibility="hidden";
- location.replace("bank-transaction-bulk-review.html"+location.search+location.hash);
+ const url=new URL("bank-transaction-bulk-review.html"+location.search+location.hash,location.href);
+ url.searchParams.set("ui","bank-alias-fast-v2-20261105");
+ location.replace(url.toString());
 }
 </script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
