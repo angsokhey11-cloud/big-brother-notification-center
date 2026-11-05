@@ -51,7 +51,8 @@ async function ensureTelegramCommands(){
    {command:"bankhelp",description:"Show Bank Assistant help"},
    {command:"checktxn",description:"Check bank transaction ID (Admin only)"},
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
-    {command:"reviewtransaction",description:"Open manual bank transaction review"},
+    {command:"starttransactionsreview",description:"Begin bank review collection"},
+    {command:"reviewtransaction",description:"Review active collection"},
    {command:"resumetransaction",description:"Open pending manual bank review"},
    {command:"myid",description:"Show your Telegram user ID"},
    {command:"groupid",description:"Show this group and topic ID for routing"}
@@ -298,98 +299,135 @@ function bankDraftRow(m:any){
    expires_at:new Date(Date.now()+7*24*3600000).toISOString()
  };
 }
-// Explicit trigger only: one private reviewer is assigned to every mapped group/topic.
-async function beginBankTransactionReview(m:any,scope:RouteScope|null){
- const commandUser=val(m.from?.id),privateChat=val(m.chat?.type)==="private"&&val(m.chat?.id)===commandUser;
- if(!await allowed(commandUser)){
-   await reply(m,"🔒 Only an authorized Bank Assistant administrator may open a bank review.");
-   return;
- }
- if(!privateChat&&!scope){
-   await reply(m,"🔒 Please use your mapped Bank Assistant group/topic or private bot chat.");
-   return;
- }
- const client=db();
- let reviewer=commandUser,sourceChat=privateChat?"":val(m.chat.id);
- let sourceThread=privateChat?0:Number(m.message_thread_id||0);
- if(privateChat){
-   const {data:routes,error}=await client.from("bb_bank_review_personal_routes")
-     .select("source_chat_id,source_thread_id").eq("reviewer_telegram_user_id",reviewer)
-     .eq("active",true).limit(3);
-   if(error)throw error;
-   if(!routes||routes.length!==1){
-     await reply(m,"🏦 More than one bank topic is mapped. Send /reviewtransaction in the specific Bank Assistant topic.");
-     return;
-   }
-   sourceChat=val(routes[0].source_chat_id);sourceThread=Number(routes[0].source_thread_id||0);
- }else{
-   const {data:route,error}=await client.from("bb_bank_review_personal_routes")
-     .select("reviewer_telegram_user_id").eq("source_chat_id",sourceChat)
-     .eq("source_thread_id",sourceThread).eq("active",true).maybeSingle();
-   if(error)throw error;
-   if(!route?.reviewer_telegram_user_id){
-     await reply(m,"🏦 First configure the mapped private bank reviewer in Telegram Manager.");
-     return;
-   }
-   reviewer=val(route.reviewer_telegram_user_id);
- }
- try{
-   if(!(await drainTopicQueue(sourceChat,sourceThread))){
-     await reply(m,"⚠️ Bank queue is busy. Retry /reviewtransaction when it unlocks.");
-     return;
-   }
- }catch(e){
-   console.warn("Bank queue intake held",e instanceof Error?e.name:"error");
-   await reply(m,"⚠️ Could not stage the queued bank messages safely. No auto-registration was run; try /reviewtransaction again.");
-   return;
- }
- // MANUAL REVIEW MODE: do not register bank balances or change payments here.
- // All forwarded notices stay as candidates for explicit administrative approval.
- const {count:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
-   .select("draft_id",{count:"exact",head:true})
-   .eq("source_chat_id",sourceChat).eq("source_thread_id",sourceThread)
-   .eq("status","candidate").is("review_batch_id",null)
-   .gt("expires_at",new Date().toISOString());
- if(pendingError)throw pendingError;
- const {count:queuePending,error:queueError}=await client.from("bb_bank_assistant_queue")
-   .select("queue_id",{count:"exact",head:true})
-   .eq("telegram_chat_id",sourceChat).eq("telegram_thread_id",sourceThread);
- if(queueError)throw queueError;
- const summary="🏦 <b>BIG BROTHER — Manual Bank Review</b>\n\n"+
-   "📋 New forwarded notices: <b>"+Number(pending||0)+"</b>\n"+
-   "🔒 Automatic registration: <b>OFF</b>\n"+
-   (Number(queuePending||0)?"⚠️ "+Number(queuePending||0)+" queued notice(s) still awaiting staging.\n":"")+
-   "\n<i>No bank balances or invoice payments are created until an administrator explicitly approves them in the review screen.</i>";
- const {data,error}=await client.rpc("bb_bank_start_transaction_review",{
-   p_reviewer:reviewer,p_chat:privateChat?null:sourceChat,
-   p_thread:privateChat?null:sourceThread
+// An explicit bank review collection is the only source of review candidates.
+const bankCollectButtons=(id:string)=>({inline_keyboard:[[
+ {text:"📋 Review Now",callback_data:"bbcollect:review:"+id},
+ {text:"➕ Continue More",callback_data:"bbcollect:more:"+id}
+]]});
+function bankCollectSummary(r:any){
+ return "🏦 <b>BIG BROTHER — Bank Review Collection</b>\n\n"+
+ "📥 Received: <b>"+Number(r.count||r.notice_count||0)+" transaction notices</b>\n"+
+ "💵 USD: <b>$"+Number(r.total_usd||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</b>\n"+
+ "៛ KHR: <b>៛"+Number(r.total_khr||0).toLocaleString("en-US",{maximumFractionDigits:0})+"</b>\n\n"+
+ "Would you like to review now, or forward more transactions?\n"+
+ "<i>Notice amounts only; not yet registered or verified.</i>";
+}
+async function startBankCollection(m:any){
+ if(!await allowed(m.from?.id))return reply(m,"🔒 Only authorized Bank Assistant admins can start transaction reviews.");
+ const {data,error}=await db().rpc("bb_bank_session_begin_v1",{
+  p_chat:val(m.chat.id),p_thread:Number(m.message_thread_id||0),p_user:val(m.from.id)
  });
- if(error){
-   await reply(m,summary+"\n\n⚠️ Review could not open: "+escape(val(error.message).slice(0,160)));
-   return;
+ if(error)return reply(m,"⚠️ Unable to start collection: "+escape(error.message.slice(0,160)));
+ if(data?.existing)return reply(m,"♻️ Bank review collection already open: <b>"+Number(data.count||0)+" notices</b>.\nForward more, or use /reviewtransaction.");
+ return reply(m,"✅ <b>Okay, I'm Ready.</b>\n\n"+
+ "Now forward your chosen bank transaction notifications in this topic. I will count them and show two buttons: <b>Review Now</b> and <b>Continue More</b>.\n"+
+ "Other chat messages and notices sent before this command are excluded. No registration is automatic.");
+}
+async function updateBankCollectPrompt(m:any,id:string,r:any){
+ const chat=val(m.chat.id),thread=Number(m.message_thread_id||0),
+ previous=Number(r.prompt_message_id||0),text=bankCollectSummary(r),
+ reply_markup=bankCollectButtons(id);
+ if(previous>0){
+  try{await tg("editMessageText",{chat_id:chat,message_id:previous,text,parse_mode:"HTML",reply_markup});return;}
+  catch(_){/* missing/old bot message; send replacement */ }
  }
- const count=Number(data?.count||0),batch=val(data?.batch_id),resuming=data?.existing===true;
- if(!batch||count<1){
-   await reply(m,summary+"\n\n✅ No manual review batch is outstanding.");
-   return;
- }
- const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-batch-review.html?batch="+
-   encodeURIComponent(batch)+"&v=silent-bank-auto-20261105";
+ const body:Record<string,unknown>={chat_id:chat,text,parse_mode:"HTML",reply_markup};
+ if(thread>0)body.message_thread_id=thread;
  try{
-   const sent=await tg("sendMessage",{
-     chat_id:reviewer,parse_mode:"HTML",
-     text:(resuming?"♻️ <b>RESUME Bank Transaction Review</b>\n\n":"🏦 <b>Bank Transaction Review</b>\n\n")+
-       "<b>"+count+" notice(s)</b> for administrator decision.\n"+
-       (resuming?"Finish this batch before new exception notices can enter the review.\n":"")+
-       "Every forwarded notice requires your review and explicit final approval.\n"+
-       "Bank balances will register only with explicit approval in this manual review.",
-     reply_markup:{inline_keyboard:[[{text:(resuming?"♻️ Resume ":"📋 Review ")+count+" Transactions",web_app:{url}}]]}
+  const sent=await tg("sendMessage",body);
+  if(sent?.ok&&sent.result?.message_id){
+   await db().from("bb_bank_review_sessions")
+    .update({prompt_message_id:Number(sent.result.message_id)})
+    .eq("session_id",id).eq("status","collecting").is("prompt_message_id",null);
+  }
+ }catch(e){console.warn("Bank collection prompt unavailable",e instanceof Error?e.name:"error");}
+}
+async function stageActiveBankNotice(m:any):Promise<void>{
+ if(!m.forward_origin&&!m.forward_date&&!m.photo&&!m.document)return;
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),user=val(m.from?.id);
+ const client=db();
+ const {data:session,error:lookupError}=await client.from("bb_bank_review_sessions")
+ .select("session_id,requested_by_telegram_user_id")
+ .eq("source_chat_id",chat).eq("source_thread_id",thread).eq("status","collecting")
+ .gt("expires_at",new Date().toISOString()).maybeSingle();
+ if(lookupError)throw lookupError;
+ if(!session||val(session.requested_by_telegram_user_id)!==user||!await allowed(user))return;
+ const row=bankDraftRow(m);if(!row)return;
+ const {data,error}=await client.rpc("bb_bank_session_stage_v1",{
+  p_session:session.session_id,p_chat:chat,p_thread:thread,p_user:user,
+  p_message_id:row.source_message_id,
+  p_notice:{sender:row.sender_name,transaction_id:row.transaction_id,amount:row.amount,
+   currency:row.currency,received_date:row.received_date,bank_channel:row.bank_channel}
+ });
+ if(error)throw error;
+ if(data?.accepted&&data?.new)await updateBankCollectPrompt(m,session.session_id,data);
+ else if(data?.reason==="limit_reached")await reply(m,"📋 You have collected 100 bank notices. Tap Review Now before forwarding more.");
+}
+async function bankCollectCallback(cb:any):Promise<boolean>{
+ const m=val(cb?.data).match(/^bbcollect:(review|more):([0-9a-f-]{36})$/i);
+ if(!m)return false;
+ const user=val(cb.from?.id),chat=val(cb.message?.chat?.id);
+ if(!await allowed(user)){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Admin permission required",show_alert:true});return true;
+ }
+ const {data:s,error}=await db().from("bb_bank_review_sessions")
+  .select("*").eq("session_id",m[2]).eq("source_chat_id",chat).maybeSingle();
+ if(error||!s||Number(s.prompt_message_id||0)!==Number(cb.message?.message_id||0)){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"This collection is no longer active.",show_alert:true});return true;
+ }
+ if(user!==val(s.requested_by_telegram_user_id)&&user!==val(s.reviewer_telegram_user_id)){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Only this session's authorized reviewer can control it.",show_alert:true});return true;
+ }
+ if(m[1]==="more"){
+  await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Okay! Continue forwarding transactions."});return true;
+ }
+ await tg("answerCallbackQuery",{callback_query_id:cb.id,text:"Preparing your review..."});
+ await beginBankTransactionReview({...cb.message,from:cb.from,message_thread_id:Number(s.source_thread_id||0)},null,m[2]);
+ return true;
+}
+// Explicit trigger only: one private reviewer is assigned to every mapped group/topic.
+async function beginBankTransactionReview(m:any,_scope:RouteScope|null,sessionId?:string){
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),user=val(m.from?.id);
+ if(!await allowed(user))return reply(m,"🔒 Only an authorized admin can open bank review.");
+ if(val(m.chat?.type)==="private")return reply(m,"🏦 Send /reviewtransaction in your mapped Bank Assistant group/topic.");
+ let request=db().from("bb_bank_review_sessions").select("*")
+  .eq("source_chat_id",chat).eq("source_thread_id",thread).in("status",["collecting","reviewing"]);
+ if(sessionId)request=request.eq("session_id",sessionId);
+ else request=request.order("started_at",{ascending:false}).limit(1);
+ const {data:session,error:sessionError}=await request.maybeSingle();
+ if(sessionError)throw sessionError;
+ if(!session)return reply(m,"🏦 Start with <code>/starttransactionsreview</code>. Random earlier forwards are not in a review.");
+ const {data:r,error}=await db().rpc("bb_bank_session_review_now_v1",{
+  p_session:session.session_id,p_chat:chat,p_thread:thread,p_user:user
+ });
+ if(error)return reply(m,"⚠️ Cannot create review: "+escape(error.message.slice(0,180)));
+ if(!r?.ok){
+  const reason=val(r?.reason),msg=reason==="empty"?"Forward a bank notification first.":
+   reason==="finish_existing_review_first"?"Finish or cancel your existing bank review first.":reason;
+  return reply(m,"⚠️ "+escape(msg));
+ }
+ const count=Number(r.count||0),batch=val(r.batch_id),reviewer=val(r.reviewer);
+ const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-batch-review.html?batch="+
+   encodeURIComponent(batch)+"&v=explicit-bank-session-20261105";
+ try{
+  const result=await tg("sendMessage",{
+   chat_id:reviewer,parse_mode:"HTML",
+   text:"🏦 <b>Bank Review Ready</b>\n\n📋 <b>"+count+" notices</b> from your explicitly started collection.\n"+
+    "Review and approve manually. No automatic registration.",
+   reply_markup:{inline_keyboard:[[{text:"📋 Open Bank Review",web_app:{url}}]]}
+  });
+  if(result?.ok!==true)throw Error("Telegram did not deliver");
+  if(Number(session.prompt_message_id||0)>0)try{
+   await tg("editMessageText",{
+    chat_id:chat,message_id:Number(session.prompt_message_id),
+    text:"📋 <b>Collection closed: "+count+" notices sent to personal review.</b>\n"+
+      "Start a new collection to forward more after this review.",
+    parse_mode:"HTML",reply_markup:{inline_keyboard:[]}
    });
-   if(sent?.ok!==true)throw Error("Telegram rejected private bank task");
-   await reply(m,summary+"\n\n📋 <b>"+count+" manual review task(s)</b> sent privately."+
-     (resuming?"\nComplete the previous batch before new exceptions are added.":""));
- }catch(_){
-   await reply(m,summary+"\n\n⚠️ Manual review saved, but the private Telegram message could not be delivered. Reviewer should send /start to the bot.");
+  }catch(_){}
+  await reply(m,"✅ Review prepared for <b>"+count+" notices</b>. Open the private Telegram review. No balances registered yet.");
+ }catch(e){
+  await reply(m,"⚠️ Review saved, but the private link could not be delivered. Ask the mapped reviewer to open the bot, then retry /reviewtransaction.");
  }
 }
 async function report(m:any,notice:ReturnType<typeof parseNotice>,scope:RouteScope){
@@ -608,6 +646,7 @@ async function resumeTransactionReplies(m:any){
 }
 async function handle(m:any,scope:RouteScope){
  const t=val(m.text||m.caption);
+ if(/^\/starttransactionsreview(?:@\w+)?$/i.test(t))return startBankCollection(m);
  if(/^\/resumetransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  if(/^\/reviewtransaction(?:@\w+)?$/i.test(t))return beginBankTransactionReview(m,scope);
  const bankAddReply=bankAddReplyData(m);
@@ -631,7 +670,7 @@ async function handle(m:any,scope:RouteScope){
 "<b>Request sender name mapping:</b>\n"+
 "<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\n"+
 "ការរក្សាទុកត្រូវការ Admin អនុម័តជាមុន។\n\n"+
-"Forward សារធនាគារច្រើនបានដោយមិនឆ្លើយរាល់សារ។ ប្រើ /reviewtransaction ដើម្បីកត់ត្រាប្រាក់ជូនអតិថិជនដែលស្គាល់ ពិនិត្យសារស្ទួន និងបើកការពិនិត្យពិសេស។"
+"Send <code>/starttransactionsreview</code>, forward chosen notices, then tap Review Now or Continue More. Only manual confirmation can register a bank balance."
 );
  if(/^\/myid(?:@\w+)?$/i.test(t))return reply(m,
   "🪪 <b>Your Telegram User ID</b>\n<code>"+escape(m.from?.id)+"</code>\n\nSend this ID to an Admin to enable approval rights."
@@ -1110,8 +1149,8 @@ Deno.serve(async(req:Request)=>{
     if(scope){
       if(await scopeAllows(m,scope)){
         if(queueableNotice(m)){
-          // Silent enqueuing; only /reviewtransaction invokes the batch processor.
-          await enqueueNotice(Number(u.update_id||0),m);
+          // Messages outside an explicit session create no review candidates.
+          await stageActiveBankNotice(m);
         }else{
           await handle(m,scope);
         }
@@ -1124,7 +1163,9 @@ Deno.serve(async(req:Request)=>{
     if(await forwardPrivateStaffV3(u,cfg.secret))return Response.json({ok:true});
     const scope=await bankScope(u.callback_query.message);
     if(scope&&await scopeAllows({from:u.callback_query.from},scope)){
-      if(!await newInvoiceRegisterClick(u.callback_query,scope))await callback(u.callback_query);
+      if(!await bankCollectCallback(u.callback_query)){
+       if(!await newInvoiceRegisterClick(u.callback_query,scope))await callback(u.callback_query);
+      }
     }
   }
   return Response.json({ok:true});
