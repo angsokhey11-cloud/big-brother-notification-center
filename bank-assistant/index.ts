@@ -444,7 +444,7 @@ async function beginBankTransactionReview(m:any,_scope:RouteScope|null,sessionId
   return reply(m,"⚠️ "+escape(msg));
  }
  const count=Number(r.count||0),batch=val(r.batch_id),reviewer=val(r.reviewer);
- const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-batch-review.html?batch="+
+ const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-bulk-review.html?batch="+
    encodeURIComponent(batch)+"&v=explicit-bank-session-20261105";
  try{
   const result=await tg("sendMessage",{
