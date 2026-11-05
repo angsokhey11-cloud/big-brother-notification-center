@@ -1066,9 +1066,15 @@ async function drainTopicQueue(chat:string,thread:number):Promise<boolean>{
    if(removeError)throw removeError;
    return true;
  }finally{
-   await client.rpc("bb_bank_assistant_unlock",{
-     p_chat:chat,p_thread:thread,p_owner:owner
-   }).catch(()=>{});
+   // PostgrestBuilder is PromiseLike: it cannot be chained with .catch().
+   try{
+     const {error:unlockError}=await client.rpc("bb_bank_assistant_unlock",{
+       p_chat:chat,p_thread:thread,p_owner:owner
+     });
+     if(unlockError)console.warn("Bank queue unlock failed",unlockError.code||"rpc");
+   }catch(error){
+     console.warn("Bank queue unlock request failed",error instanceof Error?error.name:"error");
+   }
  }
 }
 // V3 private Staff Assistant handoff: do not persist incoming updates.
