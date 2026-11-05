@@ -360,7 +360,7 @@ async function beginBankTransactionReview(m:any,scope:RouteScope|null){
    }else if(r?.outcome==="duplicate")duplicate++;
    else if(r?.outcome==="review")held++;
  }
- const {data:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
+ const {count:pending,error:pendingError}=await client.from("bb_bank_new_invoice_review_drafts")
    .select("draft_id",{count:"exact",head:true}).eq("source_chat_id",sourceChat)
    .eq("source_thread_id",sourceThread).eq("status","candidate").is("review_batch_id",null)
    .gt("expires_at",new Date().toISOString());
