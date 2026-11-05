@@ -110,6 +110,7 @@ const khr=n=>"៛"+Number(n||0).toLocaleString("en-US",{maximumFractionDigits:2}
 const amount=(n,c)=>c==="KHR"?khr(n):usd(n);
 let auth=null,batch=null,entries=[],rows=[],customers=[],identities=[],duplicates=new Map(),
 finances={available_bank_balances:[],outstanding_receivables:[]},financeAvailable=false,busy=false,filterText="";
+const financeLoadedCustomers=new Set();let financeInFlight=false,financeAgain=false,financeTimer=null;
 function view(name){for(const id of ["loading","login","workspace","complete"])el(id).classList.toggle("hide",id!==name)}
 function note(msg,failed=false){el("notice").textContent=msg;el("notice").className="banner"+(failed?" error":"");}
 function clearNote(){el("notice").className="banner hide"}
@@ -219,6 +220,22 @@ function totalsFor(customer,currency){
   khrAr:sum(finances.outstanding_receivables,"outstanding","KHR")
  };
 }
+function financeText(r){
+ if(!r.customerId)return "Customer bank balances and A/R will display after you assign a customer.";
+ if(!financeLoadedCustomers.has(r.customerId)){
+  return financeAvailable?
+   "Loading this customer's bank balances and A/R in the background…":
+   "Customer assigned. Fetching bank balances and A/R in the background…";
+ }
+ const f=totalsFor(r.customerId,r.currency);
+ const projected=r.currency==="USD"?
+  usd(f.usdBank+(r.selected?Number(r.amount)||0:0)):
+  khr(f.khrBank+(r.selected?Number(r.amount)||0:0));
+ return "Existing bank balance: "+usd(f.usdBank)+" / "+khr(f.khrBank)+"\n"+
+   "Outstanding A/R: "+usd(f.usdAr)+" / "+khr(f.khrAr)+"\n"+
+   "Projected "+r.currency+" bank balance after selection: "+projected+
+   "\nNo A/R will be cleared; no currency conversion will be applied.";
+}
 function rowDetails(r){
  const identityList=identitiesForCustomer(r.customerId);
  const aliasChoice=selectedAliasIdentity(r);
@@ -235,17 +252,7 @@ function rowDetails(r){
    '</strong> · '+esc(identityList[0].bank_name)+
    '<div class="sub">New name will be appended as Alternative Name. Existing holder and aliases stay unchanged.</div></div>':
    '<div class="bankstats">This customer has no active bank payer identity. You can create their first primary payer identity, or use Register Once.</div>';
- const f=r.customerId?totalsFor(r.customerId,r.currency):null;
- const preview=r.currency==="USD"?usd((f?.usdBank||0)+(r.selected?Number(r.amount)||0:0)):
-  khr((f?.khrBank||0)+(r.selected?Number(r.amount)||0:0));
- let finance="Customer bank balances and A/R will display after you assign a customer.";
- if(r.customerId){
-  finance=!financeAvailable?"Balance analysis unavailable; registration is still subject to protected checks.":
-   "Existing bank balance: "+usd(f.usdBank)+" / "+khr(f.khrBank)+"\n"+
-   "Outstanding A/R: "+usd(f.usdAr)+" / "+khr(f.khrAr)+"\n"+
-   "Projected "+esc(r.currency)+" bank balance after selection: "+preview+
-   "\nNo A/R will be cleared; no currency conversion will be applied.";
- }
+ const finance=financeText(r);
  return '<div class="edit">'+
   '<div class="field"><label>Customer assignment · quick search by name, ID or location</label>'+
   '<input type="search" class="customer-search" data-id="'+esc(r.id)+'" placeholder="Type customer name / ID…" autocomplete="off">'+
@@ -268,7 +275,7 @@ function rowDetails(r){
   (!r.staff?'<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">'+
     (identityList.length?'Add Alternative Name':'Create First Bank Payer')+'</button>':'')+
   '</div>'+
-  '<div class="bankstats" style="white-space:pre-line">'+esc(finance)+'</div>'+
+  '<div class="bankstats finance-summary" style="white-space:pre-line">'+esc(finance)+'</div>'+
   '</div>';
 }
 function rowHTML(r,i){
@@ -302,16 +309,59 @@ function render(){
  el("clearSelected").disabled=busy||batch.status!=="reviewing";
  el("cancel").disabled=busy||batch.status!=="reviewing";
 }
+function renderRow(r){
+ const host=el("rows");
+ const existing=[...host.children].find(node=>node.dataset?.row===r.id);
+ if(existing)existing.outerHTML=rowHTML(r,rows.indexOf(r));
+ else render();
+ metric();
+}
+function refreshFinanceSummaries(){
+ const host=el("rows");
+ for(const r of rows){
+  const container=[...host.children].find(node=>node.dataset?.row===r.id);
+  const box=container?.querySelector(".finance-summary");
+  if(box)box.textContent=financeText(r);
+ }
+}
+function scheduleFinance(){
+ if(financeTimer!==null)clearTimeout(financeTimer);
+ financeTimer=setTimeout(()=>{financeTimer=null;void loadFinance();},120);
+}
 function findRow(id){return rows.find(r=>r.id===id)}
 async function loadFinance(){
- const ids=[...new Set(rows.map(r=>r.customerId).filter(Boolean))].slice(0,100);
- if(!ids.length){financeAvailable=true;finances={available_bank_balances:[],outstanding_receivables:[]};render();return;}
+ const ids=[...new Set(rows.map(r=>r.customerId)
+  .filter(id=>id&&!financeLoadedCustomers.has(id)))].slice(0,100);
+ if(!ids.length)return;
+ if(financeInFlight){financeAgain=true;return;}
+ financeInFlight=true;
  try{
   const result=await call("bulk_inspect",{customer_ids:ids,transaction_ids:[]});
-  finances=result.analysis||{available_bank_balances:[],outstanding_receivables:[]};
+  const fresh=result.analysis||{available_bank_balances:[],outstanding_receivables:[]};
+  // Merge only the newly requested customers. Existing cached balances stay available
+  // for other rows and switching back to a previously selected customer.
+  const fetched=new Set(ids);
+  finances={
+   available_bank_balances:[
+    ...finances.available_bank_balances.filter(x=>!fetched.has(x.customer_id)),
+    ...(Array.isArray(fresh.available_bank_balances)?fresh.available_bank_balances:[])
+   ],
+   outstanding_receivables:[
+    ...finances.outstanding_receivables.filter(x=>!fetched.has(x.customer_id)),
+    ...(Array.isArray(fresh.outstanding_receivables)?fresh.outstanding_receivables:[])
+   ]
+  };
+  ids.forEach(id=>financeLoadedCustomers.add(id));
   financeAvailable=true;
- }catch(e){financeAvailable=false;console.warn("Bank review finance lookup failed",e instanceof Error?e.message:"request");}
- render();
+ }catch(e){
+  financeAvailable=false;
+  console.warn("Bank review finance lookup failed",e instanceof Error?e.message:"request");
+ }finally{
+  financeInFlight=false;
+  // Updating just the balance display prevents field focus being lost.
+  refreshFinanceSummaries();
+  if(financeAgain){financeAgain=false;scheduleFinance();}
+ }
 }
 function showCustomerMatches(input){
  const row=findRow(input.dataset.id);if(!row)return;
@@ -503,7 +553,7 @@ async function initialize(){
    const id=cl(d.transaction_id).toUpperCase();
    duplicates.set(id,[...(duplicates.get(id)||[]),cl(d.source)]);
   }
-  populate();view("workspace");render();await loadFinance();
+  populate();view("workspace");render();scheduleFinance();
   if(batch.status==="processing")note("This batch is already being finalized. Use Resume Final Registration. Existing registered items are not duplicated.");
  }catch(e){
   if(/login|sign.in|session|administrator|jwt|Unauthorized/i.test(e.message)){
@@ -528,7 +578,7 @@ el("rows").addEventListener("click",async e=>{
   row.customerId=id;row.payerId=0;row.aliasTargetId=0;
   const exact=matchesFor(row.payerName).filter(x=>x.customer_id===id);
   if(exact.length===1&&!row.staff){row.payerId=Number(exact[0].identity_id);row.aliasTargetId=row.payerId;}
-  clearNote();render();await loadFinance();return;
+  clearNote();renderRow(row);scheduleFinance();return;
  }
  if(action==="once"){row.payerId=0;render();return;}
  if(action==="directory"){await rememberPayer(row);return;}
