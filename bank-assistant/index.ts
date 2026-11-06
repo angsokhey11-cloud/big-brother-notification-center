@@ -53,7 +53,7 @@ async function ensureTelegramCommands(){
    {command:"bankadd",description:"Request sender mapping (Admin approval required)"},
     {command:"starttransactionsreview",description:"Begin bank review collection"},
     {command:"canceltransactionsreview",description:"Discard current unapproved collection"},
-    {command:"replytransaction",description:"Analyze replied bank notice (read-only)"},
+    {command:"replytransaction",description:"Analyze latest or replied bank text (read-only)"},
     {command:"reviewtransaction",description:"Review active collection"},
    {command:"resumetransaction",description:"Open pending manual bank review"},
    {command:"myid",description:"Show your Telegram user ID"},
@@ -372,7 +372,38 @@ async function updateBankCollectPrompt(m:any,id:string,r:any){
   }
  }catch(e){console.warn("Bank collection prompt unavailable",e instanceof Error?e.name:"error");}
 }
+// /replytransaction is read-only, on-demand analysis.
+// Bank messages outside /starttransactionsreview never become review candidates.
+// Store only the most recent parsed notice for 20 minutes per admin/topic.
+async function rememberReadOnlyBankNotice(m:any):Promise<void>{
+ const raw=val(m.text||m.caption);
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),
+   user=val(m.from?.id),messageId=Number(m.message_id||0);
+ if(!raw||raw.length>4500||!chat||!user||!Number.isSafeInteger(messageId)||messageId<=0)return;
+ if(!await allowed(user))return;
+ const parsed=parseNotice(raw);
+ if(!parsed.sender||!parsed.currency||!Number.isFinite(Number(parsed.amount))||Number(parsed.amount)<=0)return;
+ const {error}=await db().rpc("bb_bank_readonly_cache_notice_v1",{
+  p_chat:chat,p_thread:thread,p_user:user,p_message_id:messageId,
+  p_notice:parsed
+ });
+ if(error)throw error;
+}
+async function latestReadOnlyBankNotice(m:any){
+ const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),
+   user=val(m.from?.id),messageId=Number(m.message_id||0);
+ if(!chat||!user)return null;
+ const {data,error}=await db().from("bb_bank_readonly_last_notice")
+   .select("telegram_message_id,notice").eq("telegram_chat_id",chat)
+   .eq("telegram_thread_id",thread).eq("telegram_user_id",user)
+   .gt("expires_at",new Date().toISOString())
+   .lt("telegram_message_id",messageId).maybeSingle();
+ if(error)throw error;
+ return data?.notice&&data.notice.sender?data.notice:null;
+}
 async function stageActiveBankNotice(m:any):Promise<void>{
+ // Cache both forwarded and pasted bank TEXT; register/review separately.
+ await rememberReadOnlyBankNotice(m);
  if(!m.forward_origin&&!m.forward_date&&!m.photo&&!m.document)return;
  const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),user=val(m.from?.id);
  const client=db();
@@ -686,10 +717,20 @@ async function handle(m:any,scope:RouteScope){
  if(/^\/replytransaction(?:@\w+)?$/i.test(t)){
   if(!await allowed(m.from?.id))return reply(m,"🔒 Only authorized admins may analyze bank transaction details.");
   const original=m.reply_to_message;
-  if(!original)return reply(m,"🔎 Reply to an existing forwarded bank notification with <code>/replytransaction</code>. This is read-only.");
-  const txt=val(original.text||original.caption);
-  if(!txt)return reply(m,"⚠️ This message has no readable bank text. Image OCR is not enabled here.");
-  return report(m,parseNotice(txt),scope,false);
+  const txt=val(original?.text||original?.caption);
+  // Prefer the exact Telegram message when the command is a reply.
+  // If Telegram omitted its quoted text, fall back to this admin's
+  // latest bank notice in this group/topic (20 minute expiration).
+  const parsed=txt?parseNotice(txt):null;
+  const notice=parsed?.sender&&parsed.currency&&Number(parsed.amount)>0
+     ?parsed:await latestReadOnlyBankNotice(m);
+  if(!notice){
+   return reply(m,"🔎 <b>No recent readable bank notification.</b>\n"+
+      "Forward or paste the bank transaction text in this topic, then send <code>/replytransaction</code>.\n"+
+      "Or use Telegram <b>Reply</b> on the exact bank message. Recent-text memory expires after 20 minutes; images without captions cannot be analyzed.");
+  }
+  // No bank balance or review draft is created by transaction analysis.
+  return report(m,notice,scope,false);
  }
  if(/^\/starttransactionsreview(?:@\w+)?$/i.test(t))return startBankCollection(m);
  if(/^\/canceltransactionsreview(?:@\w+)?$/i.test(t))return cancelBankCollection(m);
@@ -716,7 +757,7 @@ async function handle(m:any,scope:RouteScope){
 "<b>Request sender name mapping:</b>\n"+
 "<code>/bankadd CUSTOMER_ID | SENDER NAME</code>\n"+
 "ការរក្សាទុកត្រូវការ Admin អនុម័តជាមុន។\n\n"+
-"Send <code>/starttransactionsreview</code>, forward chosen notices, then tap Review Now or Continue More. Only manual confirmation can register a bank balance."
+"For read-only bank analysis: forward or paste a bank notice then send <code>/replytransaction</code> within 20 minutes (or reply directly to the notice).\nSend <code>/starttransactionsreview</code> to begin a separate manual bank review collection. Only final approval can register a balance."
 );
  if(/^\/myid(?:@\w+)?$/i.test(t))return reply(m,
   "🪪 <b>Your Telegram User ID</b>\n<code>"+escape(m.from?.id)+"</code>\n\nSend this ID to an Admin to enable approval rights."
