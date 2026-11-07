@@ -35,7 +35,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid #6ed1fb;outline-
 .formgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .field label{font-size:12px;color:#bad0df;display:block;margin:0 0 5px}
 .searchmatches{margin-top:4px;max-height:210px;overflow:auto;background:#14314b;border:1px solid #466e8a;border-radius:9px}
-.searchmatches button{display:block;text-align:left;width:100%;border-bottom:1px solid #35516a;border-radius:0;background:transparent;color:#e9f4ff;min-height:34px;font-size:12px}
+.searchmatches button{display:block;text-align:left;border-bottom:1px solid #35516a;border-radius:0;background:transparent;color:#e9f4ff;min-height:34px;font-size:12px}
+.searchmatch{display:flex;align-items:center;gap:5px;border-bottom:1px solid #35516a;padding:4px 5px}
+.searchmatch .pick-select{flex:1;min-width:0;text-align:left;background:#143d43;color:#ddfff0;border:1px solid #357967;border-radius:7px;white-space:normal;line-height:1.4}
+.searchmatch .pick-only{flex:0 0 auto;padding:5px 8px;border:1px solid #54748d;border-radius:7px;font-size:11px}
 .bankstats{background:#142d40;border:1px solid #385b72;padding:10px;border-radius:9px;font-size:12px;line-height:1.7;margin-top:11px}
 .banner{padding:12px 13px;background:#102b43;border:1px solid #3f718a;border-radius:10px;margin:9px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .banner.error{border-color:#b45c68;background:#351d2c;color:#ffd8d8}
@@ -108,7 +111,7 @@ const fmt=n=>Number(n||0).toLocaleString("en-US",{maximumFractionDigits:2});
 const usd=n=>"$"+Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 const khr=n=>"៛"+Number(n||0).toLocaleString("en-US",{maximumFractionDigits:2});
 const amount=(n,c)=>c==="KHR"?khr(n):usd(n);
-let auth=null,batch=null,entries=[],rows=[],customers=[],identities=[],duplicates=new Map(),
+let auth=null,batch=null,entries=[],rows=[],customers=[],customerSearchIndex=[],identities=[],duplicates=new Map(),
 finances={available_bank_balances:[],outstanding_receivables:[]},financeAvailable=false,busy=false,filterText="";
 const financeLoadedCustomers=new Set();let financeInFlight=false,financeAgain=false,financeTimer=null,financeLookupFailed=false;
 function view(name){for(const id of ["loading","login","workspace","complete"])el(id).classList.toggle("hide",id!==name)}
@@ -140,6 +143,22 @@ async function signin(email,password){
 }
 function todayCambodia(){return new Date(Date.now()+7*3600000).toISOString().slice(0,10)}
 function dateValid(d){if(!/^\d{4}-\d{2}-\d{2}$/.test(cl(d))||d>todayCambodia())return false;const v=new Date(d+"T00:00:00Z");return !Number.isNaN(v.getTime())&&v.toISOString().slice(0,10)===d}
+// Search index is built once. Typing and choosing a customer need no server call.
+function rebuildCustomerSearchIndex(){
+ customerSearchIndex=customers.map(c=>({
+  value:c,normalized:norm(cl(c.customer_name)+" "+cl(c.customer_id)+" "+cl(c.location_code||"")),
+  id:norm(c.customer_id),name:norm(c.customer_name)
+ }));
+}
+function quickCustomerMatches(search){
+ const q=norm(search);if(!q)return [];
+ return customerSearchIndex.filter(c=>c.normalized.includes(q))
+  .sort((a,b)=>{
+   const ar=a.id===q?0:a.id.startsWith(q)?1:a.name.startsWith(q)?2:3;
+   const br=b.id===q?0:b.id.startsWith(q)?1:b.name.startsWith(q)?2:3;
+   return ar-br;
+  }).slice(0,8).map(c=>c.value);
+}
 function matchesFor(sender){
  const target=norm(sender);if(!target)return[];
  return identities.filter(x=>x.active===true&&[x.account_holder_name,...(Array.isArray(x.alternative_names)?x.alternative_names:[])].some(n=>norm(n)===target));
@@ -193,7 +212,7 @@ function valid(row){
 }
 function labelFor(row){
  const dup=duplicateReason(row);if(dup)return {txt:"Duplicate · "+dup,css:"bad"};
- if(row.staff)return {txt:"Company staff · beneficiary required",css:"warn"};
+ if(row.staff)return {txt:row.customerId?"Company staff · one-time beneficiary selected":"Company staff · beneficiary required",css:row.customerId?"good":"warn"};
  if(!row.customerId)return {txt:"Choose customer",css:"warn"};
  if(!valid(row))return {txt:"Missing / invalid details",css:"warn"};
  if(row.exact)return {txt:"Directory match · verify",css:"good"};
@@ -203,7 +222,7 @@ function metric(){
  el("received").textContent=rows.length;
  el("suggested").textContent=rows.filter(x=>x.exact&&!duplicateReason(x)&&valid(x)).length;
  el("duplicates").textContent=rows.filter(x=>!!duplicateReason(x)).length;
- el("unmatched").textContent=rows.filter(x=>!x.customerId||x.staff).length;
+ el("unmatched").textContent=rows.filter(x=>!x.customerId).length;
  let sumUsd=0,sumKhr=0,sel=0;for(const r of rows)if(r.selected){sel++;if(r.currency==="USD")sumUsd+=Number(r.amount)||0;else if(r.currency==="KHR")sumKhr+=Number(r.amount)||0;}
  el("selectedCount").textContent=sel;
  el("notSelected").textContent=(rows.length-sel)+" not selected";
@@ -250,12 +269,15 @@ function rowDetails(r){
    '<div class="bankstats">Original bank account holder: <strong>'+esc(identityList[0].account_holder_name)+
    '</strong> · '+esc(identityList[0].bank_name)+
    '<div class="sub">New name will be appended as Alternative Name. Existing holder and aliases stay unchanged.</div></div>':
-   '<div class="bankstats">This customer has no active bank payer identity. You can create their first primary payer identity, or use Register Once.</div>';
+   r.customerId?
+    '<div class="bankstats">No saved payer for this customer. <strong>Register Once works immediately</strong> after selecting the transaction; a permanent bank payer is optional.</div>':
+    '<div class="bankstats">Choose an existing customer above, then use <strong>Assign &amp; Select</strong> to include this transfer for final review. No bank payer directory entry is required.</div>';
  const finance=financeText(r);
  return '<div class="edit">'+
   '<div class="field"><label>Customer assignment · quick search by name, ID or location</label>'+
   '<input type="search" class="customer-search" data-id="'+esc(r.id)+'" placeholder="Type customer name / ID…" autocomplete="off">'+
   '<div class="searchmatches hide" data-id="'+esc(r.id)+'"></div>'+
+  '<div class="sub">Choose <strong>Assign &amp; Select</strong> to add this transfer to final review without creating a bank payer. Nothing registers until your final confirmation.</div>'+
   '<div class="sub">Selected beneficiary: <strong>'+esc(customerName(r.customerId)||"Not selected")+'</strong></div></div>'+
   (r.staff?'<div class="banner">Company staff sender detected. Select the actual customer; do not save the salesman as that customer’s permanent bank payer.</div>':'')+
   '<div class="formgrid" style="margin-top:10px">'+
@@ -271,8 +293,8 @@ function rowDetails(r){
   aliasPicker+
   '<div class="actions">'+
   (r.payerId?'<button class="secondary smallbtn" data-action="once" data-id="'+esc(r.id)+'">Use Once Instead</button>':'')+
-  (!r.staff?'<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">'+
-    (identityList.length?'Add Alternative Name':'Create First Bank Payer')+'</button>':'')+
+  (!r.staff&&r.customerId?'<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">'+
+    (identityList.length?'Add Alternative Name':'Create First Bank Payer (Optional)')+'</button>':'')+
   '</div>'+
   '<div class="bankstats finance-summary" style="white-space:pre-line">'+esc(finance)+'</div>'+
   '</div>';
@@ -364,13 +386,19 @@ async function loadFinance(){
 }
 function showCustomerMatches(input){
  const row=findRow(input.dataset.id);if(!row)return;
- const box=input.nextElementSibling,search=norm(input.value);
+ const box=input.nextElementSibling,search=cl(input.value);
  if(!search){box.classList.add("hide");box.replaceChildren();return;}
- const list=customers.filter(c=>norm(cl(c.customer_name)+" "+cl(c.customer_id)+" "+cl(c.location_code||"")).includes(search)).slice(0,12);
+ const list=quickCustomerMatches(search);
+ // Two explicit actions: one click selects for review, or simply assigns the customer.
+ // Neither action registers money nor writes to the bank directory.
  box.innerHTML=list.length?list.map(c=>
- '<button type="button" data-action="pick" data-id="'+esc(row.id)+'" data-customer="'+esc(c.customer_id)+'">'+
- esc(c.customer_name||c.customer_id)+' · '+esc(c.customer_id)+(c.location_code?' · '+esc(c.location_code):'')+'</button>').join(""):
- '<div class="small muted" style="padding:12px">No matching active customers.</div>';
+ '<div class="searchmatch">'+
+ '<button type="button" class="pick-select" data-action="pick-select" data-id="'+esc(row.id)+'" data-customer="'+esc(c.customer_id)+'">'+
+ esc(c.customer_name||c.customer_id)+' · '+esc(c.customer_id)+(c.location_code?' · '+esc(c.location_code):'')+
+ '<div class="tiny">Assign &amp; Select for Review</div></button>'+
+ '<button type="button" class="pick-only" data-action="pick" data-id="'+esc(row.id)+'" data-customer="'+esc(c.customer_id)+'">Assign only</button>'+
+ '</div>').join(""):
+ '<div class="small muted" style="padding:12px">No matching active customers. Add the customer in Customer Management first if they do not exist.</div>';
  box.classList.remove("hide");
 }
 async function rememberPayer(r){
@@ -546,7 +574,7 @@ async function initialize(){
    el("completeText").textContent="This review has already been completed or cancelled. Open a new collection in the Bank Assistant topic.";view("complete");return;
   }
   const [cs,ids]=await Promise.all([rpc("bb_bank_register_customers"),rpc("bb_customer_bank_identity_list")]);
-  customers=Array.isArray(cs)?cs:[];identities=Array.isArray(ids)?ids:[];
+  customers=Array.isArray(cs)?cs:[];rebuildCustomerSearchIndex();identities=Array.isArray(ids)?ids:[];
   duplicates=new Map();
   for(const d of result.analysis?.duplicates||[]){
    const id=cl(d.transaction_id).toUpperCase();
@@ -571,13 +599,25 @@ el("rows").addEventListener("click",async e=>{
  const target=e.target.closest("[data-action]");if(!target||busy||batch?.status!=="reviewing")return;
  const row=findRow(target.dataset.id),action=target.dataset.action;if(!row)return;
  if(action==="expand"){row.expanded=!row.expanded;render();return;}
- if(action==="pick"){
+ if(action==="pick"||action==="pick-select"){
   const id=cl(target.dataset.customer);
   if(!customers.some(c=>c.customer_id===id))return;
   row.customerId=id;row.payerId=0;row.aliasTargetId=0;
-  const exact=matchesFor(row.payerName).filter(x=>x.customer_id===id);
-  if(exact.length===1&&!row.staff){row.payerId=Number(exact[0].identity_id);row.aliasTargetId=row.payerId;}
-  clearNote();renderRow(row);scheduleFinance();return;
+  // An unknown/staff payer is a valid one-time registration for the chosen
+  // customer. We never silently add them to the permanent directory.
+  const allMatches=matchesFor(row.payerName);
+  const exact=allMatches.filter(x=>x.customer_id===id);
+  row.exact=!row.staff&&exact.length===1&&allMatches.length===1;
+  if(row.exact){row.payerId=Number(exact[0].identity_id);row.aliasTargetId=row.payerId;}
+  if(action==="pick-select"){
+   if(valid(row)&&!duplicateReason(row)){
+    row.selected=true;
+   }else{
+    row.selected=false;
+    note("Customer assigned, but the transfer still needs a valid reference, date or amount, or the ID is already registered. Correct the details before checking it.",true);
+   }
+  }else clearNote();
+  renderRow(row);scheduleFinance();return;
  }
  if(action==="once"){row.payerId=0;render();return;}
  if(action==="directory"){await rememberPayer(row);return;}

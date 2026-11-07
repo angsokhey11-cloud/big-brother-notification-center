@@ -476,7 +476,7 @@ async function beginBankTransactionReview(m:any,_scope:RouteScope|null,sessionId
  }
  const count=Number(r.count||0),batch=val(r.batch_id),reviewer=val(r.reviewer);
  const url="https://angsokhey11-cloud.github.io/big-brother-notification-center/bank-transaction-bulk-review.html?batch="+
-   encodeURIComponent(batch)+"&v=bank-alias-fast-v2-20261105";
+   encodeURIComponent(batch)+"&v=bank-review-fast-assign-v3-20261107";
  try{
   const result=await tg("sendMessage",{
    chat_id:reviewer,parse_mode:"HTML",
