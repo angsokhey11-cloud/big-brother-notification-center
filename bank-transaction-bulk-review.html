@@ -605,8 +605,10 @@ el("rows").addEventListener("click",async e=>{
   row.customerId=id;row.payerId=0;row.aliasTargetId=0;
   // An unknown/staff payer is a valid one-time registration for the chosen
   // customer. We never silently add them to the permanent directory.
-  const exact=matchesFor(row.payerName).filter(x=>x.customer_id===id);
-  if(exact.length===1&&!row.staff){row.payerId=Number(exact[0].identity_id);row.aliasTargetId=row.payerId;}
+  const allMatches=matchesFor(row.payerName);
+  const exact=allMatches.filter(x=>x.customer_id===id);
+  row.exact=!row.staff&&exact.length===1&&allMatches.length===1;
+  if(row.exact){row.payerId=Number(exact[0].identity_id);row.aliasTargetId=row.payerId;}
   if(action==="pick-select"){
    if(valid(row)&&!duplicateReason(row)){
     row.selected=true;
