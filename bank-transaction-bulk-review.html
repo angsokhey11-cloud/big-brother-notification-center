@@ -212,7 +212,7 @@ function valid(row){
 }
 function labelFor(row){
  const dup=duplicateReason(row);if(dup)return {txt:"Duplicate · "+dup,css:"bad"};
- if(row.staff)return {txt:"Company staff · beneficiary required",css:"warn"};
+ if(row.staff)return {txt:row.customerId?"Company staff · one-time beneficiary selected":"Company staff · beneficiary required",css:row.customerId?"good":"warn"};
  if(!row.customerId)return {txt:"Choose customer",css:"warn"};
  if(!valid(row))return {txt:"Missing / invalid details",css:"warn"};
  if(row.exact)return {txt:"Directory match · verify",css:"good"};
@@ -222,7 +222,7 @@ function metric(){
  el("received").textContent=rows.length;
  el("suggested").textContent=rows.filter(x=>x.exact&&!duplicateReason(x)&&valid(x)).length;
  el("duplicates").textContent=rows.filter(x=>!!duplicateReason(x)).length;
- el("unmatched").textContent=rows.filter(x=>!x.customerId||x.staff).length;
+ el("unmatched").textContent=rows.filter(x=>!x.customerId).length;
  let sumUsd=0,sumKhr=0,sel=0;for(const r of rows)if(r.selected){sel++;if(r.currency==="USD")sumUsd+=Number(r.amount)||0;else if(r.currency==="KHR")sumKhr+=Number(r.amount)||0;}
  el("selectedCount").textContent=sel;
  el("notSelected").textContent=(rows.length-sel)+" not selected";
@@ -277,6 +277,7 @@ function rowDetails(r){
   '<div class="field"><label>Customer assignment · quick search by name, ID or location</label>'+
   '<input type="search" class="customer-search" data-id="'+esc(r.id)+'" placeholder="Type customer name / ID…" autocomplete="off">'+
   '<div class="searchmatches hide" data-id="'+esc(r.id)+'"></div>'+
+  '<div class="sub">Choose <strong>Assign &amp; Select</strong> to add this transfer to final review without creating a bank payer. Nothing registers until your final confirmation.</div>'+
   '<div class="sub">Selected beneficiary: <strong>'+esc(customerName(r.customerId)||"Not selected")+'</strong></div></div>'+
   (r.staff?'<div class="banner">Company staff sender detected. Select the actual customer; do not save the salesman as that customer’s permanent bank payer.</div>':'')+
   '<div class="formgrid" style="margin-top:10px">'+
@@ -292,7 +293,7 @@ function rowDetails(r){
   aliasPicker+
   '<div class="actions">'+
   (r.payerId?'<button class="secondary smallbtn" data-action="once" data-id="'+esc(r.id)+'">Use Once Instead</button>':'')+
-  (!r.staff?'<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">'+
+  (!r.staff&&r.customerId?'<button class="secondary smallbtn" data-action="directory" data-id="'+esc(r.id)+'">'+
     (identityList.length?'Add Alternative Name':'Create First Bank Payer (Optional)')+'</button>':'')+
   '</div>'+
   '<div class="bankstats finance-summary" style="white-space:pre-line">'+esc(finance)+'</div>'+
