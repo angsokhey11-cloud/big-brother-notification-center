@@ -144,6 +144,35 @@ function bankNoticeDate(raw:string):string|null{
  return candidates.size===1?[...candidates][0]:null;
 }
 
+// ABA Khmer KHQR credit notification: parse metadata only, never auto-register.
+function parseAbaKhmerKhqrNotice(raw:string){
+ const t=raw.slice(0,4500).trim().replace(/[\u200b-\u200d\ufeff]/g,"")
+   .replace(/[\u17e0-\u17e9]/g,x=>String(x.charCodeAt(0)-0x17e0));
+ const h=t.match(/^លោកអ្នកបានទទួលប្រាក់ចំនួន\s*([\d,]+(?:\.\d{1,4})?)\s*(ដុល្លារ|រៀល)\s+ពីឈ្មោះ\s+(.+?)\s+ធនាគារ\s+ABA(?:\s+Bank)?\s+តាមការស្កេន\s+KHQR/iu);
+ if(!h)return null;
+ const d=t.match(/ថ្ងៃទី\s*([0-9]{1,2})\s*(?:ខែ\s*)?([ក-៿]+)\s*(?:ឆ្នាំ\s*)?([0-9]{4})/u);
+ const months:Record<string,number>={"មករា":1,"កុម្ភៈ":2,"មីនា":3,"មេសា":4,"ឧសភា":5,"មិថុនា":6,"កក្កដា":7,"សីហា":8,"កញ្ញា":9,"តុលា":10,"វិច្ឆិកា":11,"ធ្នូ":12};
+ if(!d)return null;
+ const day=Number(d[1]),month=months[d[2]]||0,year=Number(d[3]);
+ const check=new Date(Date.UTC(year,month-1,day));
+ const iso=String(year).padStart(4,"0")+"-"+String(month).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+ if(!month||year<2000||year>2100||check.getUTCFullYear()!==year||check.getUTCMonth()+1!==month||check.getUTCDate()!==day||iso>new Date(Date.now()+7*3600000).toISOString().slice(0,10))return null;
+ const money=Number(h[1].replace(/,/g,"")),currency=h[2]==="រៀល"?"KHR":"USD";
+ if(!Number.isFinite(money)||money<=0||(currency==="KHR"&&!Number.isInteger(money))||(currency==="USD"&&Math.abs(Math.round(money*100)-money*100)>0.00001))return null;
+ const clock=t.match(/ម៉ោង\s*([0-9]{1,2})\s*[:៖]\s*([0-9]{2})\s*(ព្រឹក|ល្ងាច|រសៀល|យប់)/u);
+ const hh=clock?Number(clock[1]):0,mm=clock?Number(clock[2]):0;
+ const receivedTime=clock&&hh>=1&&hh<=12&&mm<=59?String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+(clock[3]==="ព្រឹក"?" AM":" PM"):"";
+ const hash=t.match(/\bHash\s*[.:：#-]?\s*([0-9a-f]{8,64})\b/iu);
+ const stand=t.match(/\bSTAND\s*[:：]\s*([0-9]{4,24})/iu);
+ const receiver=t.match(/\sនៅ\s+([^,\r\n]{1,120}?)(?:\s*,\s*STAND\s*[:：]|\s*$)/iu);
+ return {
+  sender:h[3].replace(/\s+/g," ").trim(),currency,amount:money,
+  // Bank's printed Hash is the reference. STAND identifies the terminal, NOT the transaction.
+  transactionId:hash?.[1]?.toUpperCase()||"",receivedDate:iso,receivedTime,
+  channel:"ABA KHQR",senderPhone:"",receiver:receiver?.[1]?.trim()||"",stand:stand?.[1]||""
+ };
+}
+
 // ACLEDA incoming Khmer notice: read-only extraction, not a bank registration.
 function parseAcledaNotice(raw:string){
  const t=raw.trim().replace(/[\u200b-\u200d\ufeff]/g,"").replace(/[\u17e0-\u17e9]/g,x=>String(x.charCodeAt(0)-0x17e0));
@@ -167,6 +196,8 @@ function parseAcledaNotice(raw:string){
 }
 
 function parseNotice(raw:string){
+ const abaKhmer=parseAbaKhmerKhqrNotice(raw);
+ if(abaKhmer)return abaKhmer;
  const acleda=parseAcledaNotice(raw.slice(0,4500));
  if(acleda)return acleda;
  const t=raw.slice(0,4500).trim();
