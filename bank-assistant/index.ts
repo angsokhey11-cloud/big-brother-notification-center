@@ -144,11 +144,11 @@ function bankNoticeDate(raw:string):string|null{
  return candidates.size===1?[...candidates][0]:null;
 }
 
-// ABA Khmer KHQR credit notification: parse metadata only, never auto-register.
-function parseAbaKhmerKhqrNotice(raw:string){
+// Bank-independent Khmer KHQR credit notification. Reads bank notices, never registers funds.
+function parseKhmerKhqrNotice(raw:string){
  const t=raw.slice(0,4500).trim().replace(/[\u200b-\u200d\ufeff]/g,"")
    .replace(/[\u17e0-\u17e9]/g,x=>String(x.charCodeAt(0)-0x17e0));
- const h=t.match(/^លោកអ្នកបានទទួលប្រាក់ចំនួន\s*([\d,]+(?:\.\d{1,4})?)\s*(ដុល្លារ|រៀល)\s+ពីឈ្មោះ\s+(.+?)\s+ធនាគារ\s+ABA(?:\s+Bank)?\s+តាមការស្កេន\s+KHQR/iu);
+ const h=t.match(/^លោកអ្នកបានទទួលប្រាក់ចំនួន\s*([\d,]+(?:\.\d{1,4})?)\s*(ដុល្លារ|រៀល)\s+ពីឈ្មោះ\s+(.+?)\s+(?:ធនាគារ\s+[^\r\n]{2,120}?\s+)?តាមការស្កេន\s+KHQR(?=\s|$)/iu);
  if(!h)return null;
  const d=t.match(/ថ្ងៃទី\s*([0-9]{1,2})\s*(?:ខែ\s*)?([ក-៿]+)\s*(?:ឆ្នាំ\s*)?([0-9]{4})/u);
  const months:Record<string,number>={"មករា":1,"កុម្ភៈ":2,"មីនា":3,"មេសា":4,"ឧសភា":5,"មិថុនា":6,"កក្កដា":7,"សីហា":8,"កញ្ញា":9,"តុលា":10,"វិច្ឆិកា":11,"ធ្នូ":12};
@@ -169,7 +169,7 @@ function parseAbaKhmerKhqrNotice(raw:string){
   sender:h[3].replace(/\s+/g," ").trim(),currency,amount:money,
   // Bank's printed Hash is the reference. STAND identifies the terminal, NOT the transaction.
   transactionId:hash?.[1]?.toUpperCase()||"",receivedDate:iso,receivedTime,
-  channel:"ABA KHQR",senderPhone:"",receiver:receiver?.[1]?.trim()||"",stand:stand?.[1]||""
+  channel:"KHQR",senderPhone:"",receiver:receiver?.[1]?.trim()||"",stand:stand?.[1]||""
  };
 }
 
@@ -196,8 +196,8 @@ function parseAcledaNotice(raw:string){
 }
 
 function parseNotice(raw:string){
- const abaKhmer=parseAbaKhmerKhqrNotice(raw);
- if(abaKhmer)return abaKhmer;
+ const khmerKhqr=parseKhmerKhqrNotice(raw);
+ if(khmerKhqr)return khmerKhqr;
  const acleda=parseAcledaNotice(raw.slice(0,4500));
  if(acleda)return acleda;
  const t=raw.slice(0,4500).trim();
@@ -266,7 +266,7 @@ function parseNotice(raw:string){
    amount:rawAmount?amount(rawAmount):null,
    transactionId:tx,
    receivedDate:bankNoticeDate(t),
-   channel:payway?grab([/\bvia\s+(ABA KHQR)\b/i]):"",
+   channel:payway?grab([/\bvia\s+(ABA\s+(?:PAY|KHQR))\b/i]):"",
    receivedTime:"",senderPhone:"",receiver:"",stand:""
  };
 }
