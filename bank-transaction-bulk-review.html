@@ -91,7 +91,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid #6ed1fb;outline-
 </div>
 </section>
 <section id="complete" class="panel hide">
-<h2 id="completeTitle">Review Completed</h2><p id="completeText"></p>
+<h2 id="completeTitle">Review Completed</h2><p id="completeText"></p><a href="https://angsokhey11-cloud.github.io/big-brother-admin-work/bank-history.html" target="_blank" rel="noopener" style="display:inline-flex;margin-top:9px;padding:11px 14px;border-radius:9px;background:#174979;color:#fff;text-decoration:none;font-weight:800">Allocate combined payments to linked outlets</a><p class="small">If one payer paid several outlets, use Bank History to allocate its registered receipt BEFORE that bank balance is used. The transaction ID is registered only once.</p>
 </section>
 </main>
 <script>
@@ -256,6 +256,7 @@ function financeText(r){
 }
 function rowDetails(r){
  const identityList=identitiesForCustomer(r.customerId);
+ const sharedOutletCount=[...new Set(matchesFor(r.payerName||r.original.sender_name).map(x=>x.customer_id))].length;
  const aliasChoice=selectedAliasIdentity(r);
  const aliasPicker=identityList.length>1?
   '<div class="field" style="margin-top:11px"><label>Save as Alternative Name under which existing bank account?</label>'+
@@ -273,7 +274,10 @@ function rowDetails(r){
     '<div class="bankstats">No saved payer for this customer. <strong>Register Once works immediately</strong> after selecting the transaction; a permanent bank payer is optional.</div>':
     '<div class="bankstats">Choose an existing customer above, then use <strong>Assign &amp; Select</strong> to include this transfer for final review. No bank payer directory entry is required.</div>';
  const finance=financeText(r);
- return '<div class="edit">'+
+ const multiOutletHint=sharedOutletCount>1
+   ?'<div class="bankstats" style="border-color:#b6d1ec;background:#eff7ff"><strong>Shared payer: '+sharedOutletCount+' linked outlets.</strong> Register the bank receipt ONCE; then Bank History → Allocate Outlets. Do not duplicate the bank transaction ID.</div>'
+   :'';
+ return '<div class="edit">'+multiOutletHint+
   '<div class="field"><label>Customer assignment · quick search by name, ID or location</label>'+
   '<input type="search" class="customer-search" data-id="'+esc(r.id)+'" placeholder="Type customer name / ID…" autocomplete="off">'+
   '<div class="searchmatches hide" data-id="'+esc(r.id)+'"></div>'+
