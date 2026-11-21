@@ -60,11 +60,12 @@ input:focus,select:focus,button:focus-visible{outline:2px solid #6ed1fb;outline-
 <div id="notice" class="banner hide" role="alert"></div>
 <section id="loading" class="panel">Opening your protected review session…</section>
 <section id="login" class="panel login hide">
-<h2>Admin Sign-in</h2><p class="small">Sign in to BIG BROTHER to approve bank registrations. Your Telegram reviewer identity is verified separately.</p>
+<h2>Admin Sign-in</h2><p class="small">Sign in to BIG BROTHER to approve bank registrations. Dashboard access is restricted to active BIG BROTHER administrators. Telegram reviews retain their own identity verification.</p>
 <form id="loginForm"><label>Email</label><input id="email" type="email" autocomplete="username" required>
 <label>Password</label><input id="password" type="password" autocomplete="current-password" required>
 <button style="width:100%;margin-top:12px" type="submit">Sign In &amp; Open Review</button></form>
 </section>
+<section id="batchChooser" class="panel hide"><h2>Pending Bank Review Batches</h2><p class="small">Select an active batch to review. Registration requires final confirmation.</p><div id="batchOptions"></div><button type="button" id="reloadBatches" class="secondary">Refresh Pending Batches</button></section>
 <section id="workspace" class="hide">
 <div class="metrics">
 <div class="metric"><span>Received</span><strong id="received">0</strong></div>
@@ -98,12 +99,13 @@ input:focus,select:focus,button:focus-visible{outline:2px solid #6ed1fb;outline-
 (()=>{
 "use strict";
 const tg=window.Telegram?.WebApp,initData=tg?.initData||"";
+const dashboardMode=new URLSearchParams(location.search).get("dashboard")==="1";
 tg?.ready?.();tg?.expand?.();
 const endpoint="https://sjfhlaclgmkwwofzstok.supabase.co";
 const key="sb_publishable_w762jR65CWwlO30fKQsYOw_6L9grx8S";
 const api=endpoint+"/functions/v1/bb-bank-transaction-batch-review";
 const sessionKey="BB_BANK_NEW_INVOICE_ADMIN_SESSION";
-const batchId=new URLSearchParams(location.search).get("batch")||"";
+let batchId=new URLSearchParams(location.search).get("batch")||"";
 const el=id=>document.getElementById(id),cl=x=>String(x??"").trim();
 const esc=x=>cl(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]||c));
 const norm=x=>cl(x).normalize("NFKC").toLowerCase().replace(/[\u200b-\u200d\ufeff]/g,"").replace(/[.,\-_]+/g," ").replace(/\s+/g," ").trim();
@@ -134,7 +136,7 @@ document.addEventListener("visibilitychange",()=>{
   financeLookupFailed=false;financeLoadedCustomers.clear();scheduleFinance();
  }
 });
-function view(name){for(const id of ["loading","login","workspace","complete"])el(id).classList.toggle("hide",id!==name)}
+function view(name){for(const id of ["loading","login","batchChooser","workspace","complete"])el(id).classList.toggle("hide",id!==name)}
 function note(msg,failed=false){el("notice").textContent=msg;el("notice").className="banner"+(failed?" error":"");}
 function clearNote(){el("notice").className="banner hide"}
 function getSession(){try{return JSON.parse(localStorage.getItem(sessionKey)||"null")}catch{return null}}
@@ -155,7 +157,7 @@ async function rpc(name,args={}){
  let r=await req(jwt);if(r.status===401){await refresh();r=await req(await token());}return decode(r);
 }
 async function call(action,args={}){
- const r=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,batch_id:batchId,init_data:initData,session_jwt:await token(),...args})});return decode(r);
+ const r=await fetch(api,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,batch_id:batchId,init_data:initData,session_jwt:await token(),dashboard_mode:dashboardMode,...args})});return decode(r);
 }
 async function signin(email,password){
  const r=await fetch(endpoint+"/auth/v1/token?grant_type=password",{method:"POST",headers:{"content-type":"application/json",apikey:key},body:JSON.stringify({email,password})});
@@ -621,8 +623,28 @@ async function cancelReview(){
  }catch(e){note("Cancellation failed: "+e.message,true)}
  finally{setBusy(false)}
 }
+async function chooseDashboardBatch(){
+ view("batchChooser");
+ try{
+  const data=await call("list_dashboard_batches");
+  const list=el("batchOptions");list.replaceChildren();
+  if(!(data.batches||[]).length){list.textContent="No active bank review batches. Start a new review collection in Bank Assistant.";return;}
+  for(const item of data.batches){
+   const b=document.createElement("button");b.type="button";b.className="secondary";
+   b.style.cssText="display:block;width:100%;margin:10px 0;text-align:left";
+   b.textContent=new Date(item.created_at).toLocaleString()+" · "+item.status+" · "+item.batch_id.slice(0,8);
+   b.addEventListener("click",()=>{batchId=item.batch_id;void initialize()});
+   list.appendChild(b);
+  }
+ }catch(e){note("Could not load pending batches: "+e.message,true)}
+}
+el("reloadBatches").addEventListener("click",()=>void chooseDashboardBatch());
 async function initialize(){
- if(!initData||!/^[0-9a-f-]{36}$/i.test(batchId)){
+ if(dashboardMode&&!batchId){
+  auth=getSession();if(!auth?.access_token){view("login");return;}
+  await chooseDashboardBatch();return;
+ }
+ if((!dashboardMode&&!initData)||!/^[0-9a-f-]{36}$/i.test(batchId)){
   note("Open this review using the private button sent by BIG BROTHER Bank Assistant.",true);return;
  }
  try{
