@@ -114,6 +114,26 @@ const amount=(n,c)=>c==="KHR"?khr(n):usd(n);
 let auth=null,batch=null,entries=[],rows=[],customers=[],customerSearchIndex=[],identities=[],duplicates=new Map(),
 finances={available_bank_balances:[],outstanding_receivables:[]},financeAvailable=false,busy=false,filterText="";
 const financeLoadedCustomers=new Set();let financeInFlight=false,financeAgain=false,financeTimer=null,financeLookupFailed=false;
+let reviewOffline=false;
+function updateConnectivity(){
+ const offline=navigator.onLine===false;
+ if(offline){reviewOffline=true;note("Connection lost — current review selections are preserved. Wait for internet to return before saving.",true);return;}
+ if(reviewOffline){
+  reviewOffline=false;
+  note("Connection restored. Review preserved; refreshing customer balances and retrying pending lookups.");
+  financeLookupFailed=false;
+  // Do not reload the batch or replace in-progress customer edits.
+  if(batch&&rows.length){financeLoadedCustomers.clear();scheduleFinance();}
+  else if(!busy)void initialize();
+ }
+}
+window.addEventListener("offline",updateConnectivity);
+window.addEventListener("online",updateConnectivity);
+document.addEventListener("visibilitychange",()=>{
+ if(!document.hidden&&navigator.onLine!==false&&financeLookupFailed&&batch&&rows.length){
+  financeLookupFailed=false;financeLoadedCustomers.clear();scheduleFinance();
+ }
+});
 function view(name){for(const id of ["loading","login","workspace","complete"])el(id).classList.toggle("hide",id!==name)}
 function note(msg,failed=false){el("notice").textContent=msg;el("notice").className="banner"+(failed?" error":"");}
 function clearNote(){el("notice").className="banner hide"}
@@ -381,12 +401,21 @@ async function loadFinance(){
  }catch(e){
   financeAvailable=false;financeLookupFailed=true;
   console.warn("Bank review finance lookup failed",e instanceof Error?e.message:"request");
+  if(navigator.onLine===false)updateConnectivity();
  }finally{
   financeInFlight=false;
   // Updating just the balance display prevents field focus being lost.
   refreshFinanceSummaries();
   if(financeAgain){financeAgain=false;scheduleFinance();}
  }
+}
+function focusCustomerSearch(rowId){
+ const input=[...el("rows").querySelectorAll("input.customer-search")].find(x=>x.dataset.id===rowId);
+ if(!input)return;
+ // Telegram Desktop can delay activation of the embedded webview.
+ const attempt=()=>{if(!input.isConnected||document.activeElement===input)return;try{input.focus({preventScroll:true});}catch{input.focus();}};
+ attempt();requestAnimationFrame(attempt);
+ setTimeout(attempt,90);setTimeout(attempt,300);
 }
 function showCustomerMatches(input){
  const row=findRow(input.dataset.id);if(!row)return;
@@ -435,7 +464,19 @@ async function rememberPayer(r){
    note(result.new_alias_added
     ?"Alternative Name saved under "+name+". Original account holder and previous aliases are preserved. No bank balance has been registered."
     :"That payer name was already listed on "+name+". The original record is unchanged.");
-  }catch(e){note("Could not add Alternative Name: "+e.message,true)}
+  }catch(e){
+   try{
+    const latest=await rpc("bb_customer_bank_identity_list");
+    if(Array.isArray(latest)){
+     identities=latest;
+     const recovered=identities.find(x=>Number(x.identity_id)===Number(existing.identity_id));
+     if(recovered&&[recovered.account_holder_name,...(recovered.alternative_names||[])].some(n=>norm(n)===norm(r.payerName))){
+      r.payerId=Number(recovered.identity_id);r.aliasTargetId=r.payerId;
+      note("Alternative payer name confirmed after reconnecting. No duplicate save needed.");
+     }else note("Could not confirm Alternative Name: "+e.message+". Retry only after checking the directory.",true);
+    }else note("Alternative Name save status unknown. Check the directory before retrying.",true);
+   }catch(_){note("Alternative Name save status unknown after connection loss. Check the directory before retrying.",true);}
+  }
   finally{setBusy(false);renderRow(r)}
   return;
  }
@@ -456,7 +497,22 @@ async function rememberPayer(r){
    account_holder_name:r.payerName,account_number:null,alternative_names:[],active:true});
   r.payerId=Number(id);r.aliasTargetId=r.payerId;r.bankName=bank;r.exact=true;
   note("First bank payer identity created for this customer. The transfer is not registered yet.");
- }catch(e){note("Bank directory save failed: "+e.message,true)}
+ }catch(e){
+  // A lost response does not prove the payer wasn't saved. Reconcile by reading
+  // the directory before allowing another write, preventing duplicate payer entries.
+  try{
+   const latest=await rpc("bb_customer_bank_identity_list");
+   if(Array.isArray(latest)){
+    identities=latest;
+    const match=identitiesForCustomer(r.customerId).find(x=>
+      norm(x.account_holder_name)===norm(r.payerName)&&norm(x.bank_name)===norm(bank));
+    if(match){
+     r.payerId=Number(match.identity_id);r.aliasTargetId=r.payerId;r.exact=true;
+     note("Bank payer exists in the directory. Recovered its saved identity after an interrupted response. No second payer was created.");
+    }else note("Bank directory save not confirmed: "+e.message+". Check connection before trying again.",true);
+   }else note("Bank directory save status unknown. Reopen the review and check the payer directory before retrying.",true);
+  }catch(_){note("Bank directory save status unknown after connection loss. Do not create it again until the directory can be checked.",true);}
+ }
  finally{setBusy(false);renderRow(r)}
 }
 function setBusy(state,msg){
@@ -602,7 +658,7 @@ el("loginForm").onsubmit=async e=>{
 el("rows").addEventListener("click",async e=>{
  const target=e.target.closest("[data-action]");if(!target||busy||batch?.status!=="reviewing")return;
  const row=findRow(target.dataset.id),action=target.dataset.action;if(!row)return;
- if(action==="expand"){row.expanded=!row.expanded;render();return;}
+ if(action==="expand"){row.expanded=!row.expanded;render();if(row.expanded)focusCustomerSearch(row.id);return;}
  if(action==="pick"||action==="pick-select"){
   const id=cl(target.dataset.customer);
   if(!customers.some(c=>c.customer_id===id))return;
@@ -625,6 +681,10 @@ el("rows").addEventListener("click",async e=>{
  }
  if(action==="once"){row.payerId=0;render();return;}
  if(action==="directory"){await rememberPayer(row);return;}
+});
+el("rows").addEventListener("pointerdown",e=>{
+ const input=e.target.closest("input.customer-search");
+ if(input)setTimeout(()=>{if(input.isConnected&&document.activeElement!==input)input.focus({preventScroll:true});},0);
 });
 el("rows").addEventListener("input",e=>{
  if(e.target.classList.contains("customer-search"))showCustomerMatches(e.target);
