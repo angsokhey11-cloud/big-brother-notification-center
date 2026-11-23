@@ -144,6 +144,15 @@ function bankNoticeDate(raw:string):string|null{
  return candidates.size===1?[...candidates][0]:null;
 }
 
+// STAND is the merchant QR stand, reused across customers. It is never
+// a payment ID or duplicate key; prefer the unique bank Hash/reference.
+function safeNoticeReference(raw:string,candidate:string){
+ const id=val(candidate).toUpperCase();
+ if(!id)return "";
+ const normalized=raw.replace(/[\u17e0-\u17e9]/g,x=>String(x.charCodeAt(0)-0x17e0));
+ const stands=[...normalized.matchAll(/\bSTAND\s*[:：]\s*([0-9]{4,24})/giu)];
+ return stands.some(x=>x[1]===id)?"":id;
+}
 // Bank-independent Khmer KHQR credit notification. Reads bank notices, never registers funds.
 function parseKhmerKhqrNotice(raw:string){
  const t=raw.slice(0,4500).trim().replace(/[\u200b-\u200d\ufeff]/g,"")
@@ -168,7 +177,7 @@ function parseKhmerKhqrNotice(raw:string){
  return {
   sender:h[3].replace(/\s+/g," ").trim(),currency,amount:money,
   // Bank's printed Hash is the reference. STAND identifies the terminal, NOT the transaction.
-  transactionId:hash?.[1]?.toUpperCase()||"",receivedDate:iso,receivedTime,
+  transactionId:safeNoticeReference(t,hash?.[1]||""),receivedDate:iso,receivedTime,
   channel:"KHQR",senderPhone:"",receiver:receiver?.[1]?.trim()||"",stand:stand?.[1]||""
  };
 }
@@ -192,7 +201,7 @@ function parseAcledaNotice(raw:string){
  const hh=clock?Number(clock[1]):0,mm=clock?Number(clock[2]):0;
  const receivedTime=clock&&hh>=1&&hh<=12&&mm<=59?String(hh).padStart(2,"0")+":"+String(mm).padStart(2,"0")+(clock[3]==="ព្រឹក"?" AM":" PM"):"";
  const terminal=t.match(/(?:^|[,，])\s*នៅ\s*([^,\r\n]+?)\s+STAND\s*[:：]\s*([0-9]{4,24})/iu);
- return {sender:head[4].trim(),currency,amount:money,transactionId:tx[1],receivedDate:iso,receivedTime,senderPhone:head[3],receiver:terminal?.[1]?.trim()||"",stand:terminal?.[2]||"",channel:"ACLEDA"};
+ return {sender:head[4].trim(),currency,amount:money,transactionId:safeNoticeReference(t,tx[1]),receivedDate:iso,receivedTime,senderPhone:head[3],receiver:terminal?.[1]?.trim()||"",stand:terminal?.[2]||"",channel:"ACLEDA"};
 }
 
 function parseNotice(raw:string){
@@ -264,7 +273,7 @@ function parseNotice(raw:string){
    sender,
    currency,
    amount:rawAmount?amount(rawAmount):null,
-   transactionId:tx,
+   transactionId:safeNoticeReference(t,tx),
    receivedDate:bankNoticeDate(t),
    channel:payway?grab([/\bvia\s+(ABA\s+(?:PAY|KHQR))\b/i]):"",
    receivedTime:"",senderPhone:"",receiver:"",stand:""
@@ -320,12 +329,15 @@ async function newInvoiceRegisterClick(cb:any,_scope:RouteScope){
 function bankDraftRow(m:any){
  const raw=val(m.text||m.caption),parsed=raw?parseNotice(raw):null;
  const onlyId=raw.match(/^(?:លេខយោង\s*[:：]?\s*|Trx\.?\s*ID\s*[:：]?\s*)?([0-9]{5,20})$/iu);
- const id=parsed?.transactionId||onlyId?.[1]||null;
+ const id=safeNoticeReference(raw,parsed?.transactionId||onlyId?.[1]||"")||null;
+ // Unlabelled 9+ digit numeric references in KHQR are stand-like and must
+ // go to manual review; never feed them to automatic registration.
+ const safeId=parsed?.channel==="KHQR"&&id&&/^[0-9]{9,24}$/.test(id)?null:id;
  const chat=val(m.chat?.id),thread=Number(m.message_thread_id||0),mid=Number(m.message_id||0);
  if(!chat||!Number.isSafeInteger(mid)||mid<1)return null;
  return {
    source_chat_id:chat,source_thread_id:thread,source_message_id:mid,
-   sender_name:parsed?.sender||null,transaction_id:id,
+   sender_name:parsed?.sender||null,transaction_id:safeId,
    amount:parsed?.amount!=null&&Number.isFinite(parsed.amount)&&parsed.amount>0?parsed.amount:null,
    currency:parsed?.currency||null,bank_channel:parsed?.channel||null,
    received_date:parsed?.receivedDate||null,

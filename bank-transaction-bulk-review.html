@@ -224,6 +224,7 @@ function duplicateReason(row){
 function valid(row){
  if(!row.customerId||!customers.some(c=>c.customer_id===row.customerId))return false;
  if(!/^[A-Z0-9_/-]{4,160}$/.test(cl(row.transactionId).toUpperCase()))return false;
+ if(cl(row.original?.bank_channel).toUpperCase()==="KHQR"&&/^[0-9]{9,24}$/.test(cl(row.transactionId)))return false;
  if(!["USD","KHR"].includes(row.currency))return false;
  if(!Number.isFinite(Number(row.amount))||Number(row.amount)<=0||Number(row.amount)>999999999)return false;
  if(!dateValid(row.receivedDate))return false;
@@ -233,6 +234,8 @@ function valid(row){
  return row.payerName.length>=2&&row.payerName.length<=140;
 }
 function labelFor(row){
+ if(cl(row.original?.bank_channel).toUpperCase()==="KHQR"&&/^[0-9]{9,24}$/.test(cl(row.transactionId)))
+  return {txt:"STAND is merchant ID — enter the KHQR Hash instead",css:"bad"};
  const dup=duplicateReason(row);if(dup)return {txt:"Duplicate · "+dup,css:"bad"};
  if(row.staff)return {txt:row.customerId?"Company staff · one-time beneficiary selected":"Company staff · beneficiary required",css:row.customerId?"good":"warn"};
  if(!row.customerId)return {txt:"Choose customer",css:"warn"};
@@ -307,7 +310,7 @@ function rowDetails(r){
   '<div class="sub">Selected beneficiary: <strong>'+esc(customerName(r.customerId)||"Not selected")+'</strong></div></div>'+
   (r.staff?'<div class="banner">Company staff sender detected. Select the actual customer; do not save the salesman as that customer’s permanent bank payer.</div>':'')+
   '<div class="formgrid" style="margin-top:10px">'+
-  '<div class="field"><label>Transaction ID</label><input type="text" data-id="'+esc(r.id)+'" data-field="transactionId" maxlength="160" value="'+esc(r.transactionId)+'"></div>'+
+  '<div class="field"><label>Transaction ID / Hash (never STAND)</label><input type="text" data-id="'+esc(r.id)+'" data-field="transactionId" maxlength="160" value="'+esc(r.transactionId)+'"></div>'+
   '<div class="field"><label>Received date</label><input type="date" data-id="'+esc(r.id)+'" data-field="receivedDate" value="'+esc(r.receivedDate)+'"></div>'+
   '<div class="field"><label>Amount</label><input type="number" min="0" step="any" data-id="'+esc(r.id)+'" data-field="amount" value="'+esc(r.amount)+'"></div>'+
   '<div class="field"><label>Bank currency</label><select data-id="'+esc(r.id)+'" data-field="currency"><option value="">Select</option>'+

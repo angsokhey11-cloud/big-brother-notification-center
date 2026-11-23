@@ -342,6 +342,8 @@ function details(){
  const skip=el("skipPayer").checked;
  if(!cid||(!skip&&(!Number.isSafeInteger(pid)||pid<1)))throw Error("Select a customer and an active bank payer, or choose transaction-only sender.");
  if(!tid||tid.length>160)throw Error("Enter an actual bank transaction ID (not an invoice number).");
+ if(clean(current().bank_channel).toUpperCase()==="KHQR"&&/^[0-9]{9,24}$/.test(tid))
+  throw Error("STAND identifies the merchant QR stand, not the payment. Enter the KHQR Hash.");
  if(!Number.isFinite(a)||a<=0)throw Error("Check actual bank amount.");
  if(!Number.isFinite(rate)||rate<=0||(cur!==inv&&rate<=1))throw Error("Valid KHR per USD rate required.");
  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>today())throw Error("Choose the correct bank received date.");

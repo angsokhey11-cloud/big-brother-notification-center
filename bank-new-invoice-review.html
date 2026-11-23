@@ -309,6 +309,8 @@ el("registerForm").onsubmit=async(e)=>{
  const invCur=el("invoiceCurrency").value,rate=actualCur===invCur?1:Number(el("rate").value);
  if(!cid||!Number.isSafeInteger(pid)||pid<1)return error("Confirm an existing payer or save a new one to Customer Bank Directory.");
  if(!tid||actualAmount<=0||!Number.isFinite(actualAmount))return error("Check the transaction ID and actual bank amount.");
+ if(clean(draft.bank_channel).toUpperCase()==="KHQR"&&/^[0-9]{9,24}$/.test(tid))
+  return error("STAND is the merchant QR stand, not the transaction. Enter the KHQR Hash.");
  if(!Number.isFinite(rate)||rate<=0||(actualCur!==invCur&&rate<=1))return error("Enter a valid KHR per USD exchange rate.");
  const equivalent=actualCur===invCur?actualAmount:actualCur==="KHR"?actualAmount/rate:actualAmount*rate;
  const found=customers.find(x=>x.customer_id===cid);
