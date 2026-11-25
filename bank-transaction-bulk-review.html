@@ -48,6 +48,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid #6ed1fb;outline-
 .footer{position:sticky;bottom:0;z-index:10;background:#091827ee;backdrop-filter:blur(12px);padding:13px 14px;border:1px solid #34546d;border-radius:14px;box-shadow:0 0 24px #0006}
 .footer .line{margin-bottom:8px}.footer button{width:100%}
 .headnote{font-size:12px;color:#a9c2d4;margin-top:8px}
+#payerConfirm{width:min(480px,calc(100% - 28px));max-height:85vh;overflow:auto;color:#e9f3fc;background:#11283e;border:1px solid #52758f;border-radius:14px;padding:18px}
+#payerConfirm::backdrop{background:#030b14b8}
+#payerConfirmText{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+#payerConfirm .actions{justify-content:flex-end;margin-top:16px}
 .login{max-width:500px;margin:40px auto}.login label{display:block;margin:10px 0 5px}
 @media(min-width:800px){.wrap{padding:20px 26px 170px}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tx{margin-bottom:0}}
 @media(max-width:600px){.wrap{padding:12px 10px 160px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.formgrid{grid-template-columns:1fr 1fr}.tx{padding:10px}.amount{font-size:14px}.footer{padding:10px}}
@@ -95,6 +99,14 @@ input:focus,select:focus,button:focus-visible{outline:2px solid #6ed1fb;outline-
 <h2 id="completeTitle">Review Completed</h2><p id="completeText"></p><a href="https://angsokhey11-cloud.github.io/big-brother-admin-work/bank-history.html" target="_blank" rel="noopener" style="display:inline-flex;margin-top:9px;padding:11px 14px;border-radius:9px;background:#174979;color:#fff;text-decoration:none;font-weight:800">Allocate combined payments to linked outlets</a><p class="small">If one payer paid several outlets, use Bank History to allocate its registered receipt BEFORE that bank balance is used. The transaction ID is registered only once.</p>
 </section>
 </main>
+<dialog id="payerConfirm" aria-labelledby="payerConfirmTitle" aria-describedby="payerConfirmText">
+ <form id="payerConfirmForm">
+ <h2 id="payerConfirmTitle">Confirm bank directory change</h2>
+ <p id="payerConfirmText"></p>
+ <div id="payerConfirmBankField" class="field hide"><label for="payerConfirmBank">Bank name</label><input id="payerConfirmBank" type="text" maxlength="120" autocomplete="off"></div>
+ <div class="actions"><button type="button" class="secondary" id="payerConfirmCancel" autofocus>Cancel</button><button type="submit">Confirm &amp; Save</button></div>
+ </form>
+</dialog>
 <script>
 (()=>{
 "use strict";
@@ -418,9 +430,11 @@ function focusCustomerSearch(rowId){
  const input=[...el("rows").querySelectorAll("input.customer-search")].find(x=>x.dataset.id===rowId);
  if(!input)return;
  // Telegram Desktop can delay activation of the embedded webview.
- const attempt=()=>{if(!input.isConnected||document.activeElement===input)return;try{input.focus({preventScroll:true});}catch{input.focus();}};
- attempt();requestAnimationFrame(attempt);
- setTimeout(attempt,90);setTimeout(attempt,300);
+ const attempt=()=>{if(busy||directoryConfirmOpen||!input.isConnected||document.activeElement===input)return;try{input.focus({preventScroll:true});}catch{input.focus();}};
+ attempt();
+ // Retry only while no newer control has acquired focus.
+ const retry=()=>{if(document.activeElement===document.body||document.activeElement===document.documentElement)attempt();};
+ requestAnimationFrame(retry);setTimeout(retry,90);setTimeout(retry,300);
 }
 function showCustomerMatches(input){
  const row=findRow(input.dataset.id);if(!row)return;
@@ -439,6 +453,53 @@ function showCustomerMatches(input){
  '<div class="small muted" style="padding:12px">No matching active customers. Add the customer in Customer Management first if they do not exist.</div>';
  box.classList.remove("hide");
 }
+// Directory confirmation stays in the current WebView, never a native popup.
+let directoryConfirmOpen=false;
+function confirmDirectoryChange(message,needsBank=false){
+ if(directoryConfirmOpen)return Promise.resolve(null);
+ const dialog=el("payerConfirm"),form=el("payerConfirmForm"),bank=el("payerConfirmBank"),previous=document.activeElement,cancelButton=el("payerConfirmCancel");
+ directoryConfirmOpen=true;
+ el("payerConfirmText").textContent=message;
+ el("payerConfirmBankField").classList.toggle("hide",!needsBank);
+ bank.value="";bank.required=needsBank;bank.disabled=!needsBank;bank.setCustomValidity("");
+ bank.oninput=()=>bank.setCustomValidity("");
+ return new Promise(resolve=>{
+  let settled=false;
+  const finish=result=>{
+   if(settled)return;settled=true;
+   form.removeEventListener("submit",submit);dialog.removeEventListener("cancel",cancel);
+   dialog.removeEventListener("close",closed);cancelButton.removeEventListener("click",cancel);
+   if(dialog.open)dialog.close();
+   directoryConfirmOpen=false;
+   if(previous?.isConnected)previous.focus({preventScroll:true});
+   resolve(result);
+  };
+  const submit=e=>{e.preventDefault();const value=cl(bank.value);if(needsBank&&value.length<2){bank.setCustomValidity("Enter a valid bank name.");bank.reportValidity();return;}finish({bank:value});};
+  const cancel=e=>{e.preventDefault();finish(null);};
+  const closed=()=>finish(null);
+  form.addEventListener("submit",submit);dialog.addEventListener("cancel",cancel);
+  dialog.addEventListener("close",closed);cancelButton.addEventListener("click",cancel);
+  try{dialog.showModal();(needsBank?bank:cancelButton).focus({preventScroll:true});}
+  catch(error){finish(null);note("Could not open bank directory confirmation. No changes saved.",true);}
+ });
+}
+function setDirectoryBusy(state,row,msg){
+ busy=state;
+ // Preserve every unrelated card and search field while saving the directory.
+ el("rows").inert=state;el("filter").disabled=state;
+ if(msg)el("progressText").textContent=msg;
+ else if(!state)el("progressText").textContent="Requires your final confirmation. No automatic registration.";
+ if(!state){
+  renderRow(row);
+  const card=[...el("rows").children].find(x=>x.dataset.row===row.id);
+  const button=card?.querySelector('[data-action="expand"]');
+  if(button&&document.activeElement===document.body)button.focus({preventScroll:true});
+ }
+ metric();
+ el("selectSuggested").disabled=busy||batch.status!=="reviewing";
+ el("clearSelected").disabled=busy||batch.status!=="reviewing";
+ el("cancel").disabled=busy||batch.status!=="reviewing";
+}
 async function rememberPayer(r){
  if(!r.customerId){note("Choose the beneficiary customer first.",true);return;}
  if(r.staff){note("Company staff deposits must use Register Once. Do not save the salesman's name in a customer's permanent bank directory.",true);return;}
@@ -451,11 +512,11 @@ async function rememberPayer(r){
  }
  if(current.length){
   const name=cl(existing.account_holder_name),bank=cl(existing.bank_name);
-  if(!confirm("ADD AN ALTERNATIVE PAYER NAME?\n\nCustomer: "+customerName(r.customerId)+
+  if(!await confirmDirectoryChange("ADD AN ALTERNATIVE PAYER NAME?\n\nCustomer: "+customerName(r.customerId)+
    "\nOriginal account holder: "+name+"\nBank: "+bank+
    "\nNew alternative name: "+r.payerName+
    "\n\nThe original holder and existing alternative names will remain unchanged. Do not save salesmen or third parties who pay for multiple customers."))return;
-  setBusy(true,"Appending Alternative Name without changing the original holder…");
+  setDirectoryBusy(true,r,"Appending Alternative Name without changing the original holder…");
   try{
    const result=await rpc("bb_customer_bank_identity_add_alias_v1",{
     p_customer_id:r.customerId,p_identity_id:Number(existing.identity_id),
@@ -482,16 +543,17 @@ async function rememberPayer(r){
     }else note("Alternative Name save status unknown. Check the directory before retrying.",true);
    }catch(_){note("Alternative Name save status unknown after connection loss. Check the directory before retrying.",true);}
   }
-  finally{setBusy(false);renderRow(r)}
+  finally{setDirectoryBusy(false,r)}
   return;
  }
  // A customer without any bank identity can explicitly create their first primary payer.
- if(!confirm("CREATE FIRST BANK PAYER IDENTITY?\n\nCustomer: "+customerName(r.customerId)+
+ const decision=await confirmDirectoryChange("CREATE FIRST BANK PAYER IDENTITY?\n\nCustomer: "+customerName(r.customerId)+
   "\nNew primary holder: "+r.payerName+
-  "\n\nThis customer has no active bank payer directory entry. Continue only if this is their own bank payer identity. Use Register Once for staff or third-party deposits."))return;
- const bank=cl(r.bankName)||prompt("Enter the bank name for the first payer identity:");
+  "\n\nThis customer has no active bank payer directory entry. Continue only if this is their own bank payer identity. Use Register Once for staff or third-party deposits.",!cl(r.bankName));
+ if(!decision)return;
+ const bank=cl(r.bankName)||decision.bank;
  if(!bank||bank.length<2){note("Bank name required to create the first payer identity.",true);return;}
- setBusy(true,"Creating the customer's first bank payer identity…");
+ setDirectoryBusy(true,r,"Creating the customer's first bank payer identity…");
  try{
   const id=await rpc("bb_customer_bank_identity_save",{
    p_customer_id:r.customerId,p_bank_name:bank,p_holder_name:r.payerName,
@@ -518,7 +580,7 @@ async function rememberPayer(r){
    }else note("Bank directory save status unknown. Reopen the review and check the payer directory before retrying.",true);
   }catch(_){note("Bank directory save status unknown after connection loss. Do not create it again until the directory can be checked.",true);}
  }
- finally{setBusy(false);renderRow(r)}
+ finally{setDirectoryBusy(false,r)}
 }
 function setBusy(state,msg){
  busy=state;
@@ -683,7 +745,7 @@ el("loginForm").onsubmit=async e=>{
 el("rows").addEventListener("click",async e=>{
  const target=e.target.closest("[data-action]");if(!target||busy||batch?.status!=="reviewing")return;
  const row=findRow(target.dataset.id),action=target.dataset.action;if(!row)return;
- if(action==="expand"){row.expanded=!row.expanded;render();if(row.expanded)focusCustomerSearch(row.id);return;}
+ if(action==="expand"){row.expanded=!row.expanded;renderRow(row);if(row.expanded)focusCustomerSearch(row.id);return;}
  if(action==="pick"||action==="pick-select"){
   const id=cl(target.dataset.customer);
   if(!customers.some(c=>c.customer_id===id))return;
@@ -704,12 +766,12 @@ el("rows").addEventListener("click",async e=>{
   }else clearNote();
   renderRow(row);scheduleFinance();return;
  }
- if(action==="once"){row.payerId=0;render();return;}
+ if(action==="once"){row.payerId=0;renderRow(row);return;}
  if(action==="directory"){await rememberPayer(row);return;}
 });
 el("rows").addEventListener("pointerdown",e=>{
  const input=e.target.closest("input.customer-search");
- if(input)setTimeout(()=>{if(input.isConnected&&document.activeElement!==input)input.focus({preventScroll:true});},0);
+ if(input&&!busy&&!directoryConfirmOpen){try{input.focus({preventScroll:true});}catch{input.focus();}}
 });
 el("rows").addEventListener("input",e=>{
  if(e.target.classList.contains("customer-search"))showCustomerMatches(e.target);
